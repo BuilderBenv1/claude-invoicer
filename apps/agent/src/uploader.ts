@@ -9,24 +9,34 @@ export interface IngestResponse {
 
 const CHUNK = 1000;
 
-/** POST activity intervals to the dashboard ingest endpoint, chunked. */
+/**
+ * POST activity intervals to the dashboard ingest endpoint, chunked.
+ * When `replace` is true the first chunk carries replace=true so the server
+ * clears existing rows before re-ingesting the full recomputed set.
+ */
 export async function uploadIntervals(
   apiBaseUrl: string,
   token: string,
   intervals: ActivityInterval[],
+  replace = false,
 ): Promise<IngestResponse> {
   let accepted = 0;
   let resync = false;
 
-  for (let i = 0; i < intervals.length; i += CHUNK) {
-    const batch = intervals.slice(i, i + CHUNK);
+  // Ensure a replace happens even when there are no intervals to send.
+  const chunks: ActivityInterval[][] = [];
+  for (let i = 0; i < intervals.length; i += CHUNK) chunks.push(intervals.slice(i, i + CHUNK));
+  if (chunks.length === 0) chunks.push([]);
+
+  for (let c = 0; c < chunks.length; c++) {
+    const batch = chunks[c]!;
     const res = await fetch(`${apiBaseUrl}/api/ingest`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ intervals: batch }),
+      body: JSON.stringify({ intervals: batch, replace: replace && c === 0 }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');

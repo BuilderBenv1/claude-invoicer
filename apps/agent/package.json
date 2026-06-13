@@ -7,6 +7,7 @@
     "start": "tsx src/index.ts",
     "once": "tsx src/index.ts --once",
     "dry-run": "tsx src/index.ts --once --dry-run",
+    "resync": "tsx src/index.ts --resync",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

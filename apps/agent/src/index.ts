@@ -41,7 +41,7 @@ function printDrySummary(result: ScanResult): void {
   console.log('(dry run — nothing uploaded, cursor untouched)');
 }
 
-async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean }): Promise<void> {
+async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boolean }): Promise<void> {
   const idleCapMs = cfg.idleCapMin * MIN;
 
   if (!existsSync(cfg.claudeProjectsDir)) {
@@ -52,6 +52,15 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean }): Promise<voi
   if (opts.dryRun) {
     const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs, force: true, persistCursor: false });
     printDrySummary(result);
+    return;
+  }
+
+  if (opts.resync) {
+    log('resync: recomputing all transcripts and replacing server data...');
+    clearCursor();
+    const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs, force: true });
+    const resp = await uploadIntervals(cfg.apiBaseUrl, cfg.deviceToken, result.intervals, true);
+    log(`resync complete: replaced with ${resp.accepted} interval(s)`);
     return;
   }
 
@@ -84,7 +93,8 @@ function requireServerConfig(cfg: AgentConfig): void {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes('--dry-run');
-  const once = argv.includes('--once') || dryRun;
+  const resync = argv.includes('--resync');
+  const once = argv.includes('--once') || dryRun || resync;
 
   const cfg = loadConfig();
   if (!dryRun) requireServerConfig(cfg);
@@ -93,7 +103,7 @@ async function main(): Promise<void> {
   log(`projects: ${cfg.claudeProjectsDir}`);
 
   if (once) {
-    await runOnce(cfg, { dryRun });
+    await runOnce(cfg, { dryRun, resync });
     return;
   }
 
