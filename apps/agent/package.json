@@ -1,0 +1,20 @@
+{
+  "name": "@claude-invoicer/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "once": "tsx src/index.ts --once",
+    "dry-run": "tsx src/index.ts --once --dry-run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@claude-invoicer/core": "*",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  }
+}

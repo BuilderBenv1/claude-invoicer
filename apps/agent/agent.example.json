@@ -1,0 +1,6 @@
+{
+  "apiBaseUrl": "https://your-app.vercel.app",
+  "deviceToken": "paste-the-same-secret-as-AGENT_TOKEN-on-the-server",
+  "idleCapMin": 5,
+  "scanIntervalMin": 5
+}
