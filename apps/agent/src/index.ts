@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { loadConfig, CONFIG_PATH, type AgentConfig } from './config.js';
-import { clearCursor } from './cursor.js';
+import { clearCursor, saveCursor } from './cursor.js';
 import { scan, type ScanResult } from './scanner.js';
 import { uploadIntervals } from './uploader.js';
 
@@ -50,16 +50,17 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boole
   }
 
   if (opts.dryRun) {
-    const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs, force: true, persistCursor: false });
+    const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs, force: true });
     printDrySummary(result);
     return;
   }
 
   if (opts.resync) {
     log('resync: recomputing all transcripts and replacing server data...');
-    clearCursor();
     const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs, force: true });
     const resp = await uploadIntervals(cfg.apiBaseUrl, cfg.deviceToken, result.intervals, true);
+    // Persist the cursor only now that the upload succeeded.
+    saveCursor(result.cursor);
     log(`resync complete: replaced with ${resp.accepted} interval(s)`);
     return;
   }
@@ -67,10 +68,14 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boole
   const result = scan({ projectsDir: cfg.claudeProjectsDir, idleCapMs });
   if (result.intervals.length === 0) {
     log(`scan: ${result.filesChanged}/${result.filesTotal} changed, nothing new to upload`);
+    saveCursor(result.cursor); // safe: no intervals to lose
     return;
   }
   log(`scan: ${result.filesChanged}/${result.filesTotal} changed -> ${result.intervals.length} intervals, uploading...`);
   const resp = await uploadIntervals(cfg.apiBaseUrl, cfg.deviceToken, result.intervals);
+  // Only advance the cursor after a successful upload, so a failed upload
+  // re-sends these intervals next time instead of skipping them forever.
+  saveCursor(result.cursor);
   log(`uploaded ${resp.accepted} interval(s)`);
   if (resp.resync) {
     log('server requested resync — clearing cursor, next scan re-reads everything');

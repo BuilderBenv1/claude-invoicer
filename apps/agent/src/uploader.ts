@@ -7,7 +7,7 @@ export interface IngestResponse {
   resync?: boolean;
 }
 
-const CHUNK = 1000;
+const CHUNK = 500;
 
 /**
  * POST activity intervals to the dashboard ingest endpoint, chunked.
