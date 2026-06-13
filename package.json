@@ -1,0 +1,20 @@
+{
+  "name": "claude-invoicer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tracks Claude Code session time per client and turns it into invoices + receipts.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "npm run test --workspace @claude-invoicer/core",
+    "test:watch": "npm run test:watch --workspace @claude-invoicer/core",
+    "agent": "npm run start --workspace @claude-invoicer/agent",
+    "agent:once": "npm run once --workspace @claude-invoicer/agent",
+    "web": "npm --prefix apps/web run dev"
+  }
+}

@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# vercel
+.vercel
+
+# local agent state (lives in ~/.claude-invoicer, but ignore any stray copies)
+agent.json
+cursor.json
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# local claude config / state
+.claude/
+
+# test
+coverage/
