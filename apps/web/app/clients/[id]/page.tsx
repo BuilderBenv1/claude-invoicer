@@ -20,8 +20,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const detail = await getClientDetail(id);
   if (!detail) notFound();
 
-  const { client, mappings, byWeek, unbilledMs, thisWeekMs, previewLines, oneOffs, previewSubtotal, recentIntervals, settings, roundIncrementMin } = detail;
-  const maxWeek = Math.max(1, ...byWeek.map((w) => w.ms));
+  const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey } = detail;
+  const billableWeeks = weeks.filter((w) => w.amount > 0 || w.billed);
 
   return (
     <div className="space-y-10">
@@ -31,92 +31,68 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             ← Overview
           </Link>
           <h1 className="text-2xl font-semibold">{client.name}</h1>
+          <div className="text-xs text-slate-500">
+            {formatMoney(client.hourlyRate, client.currency)}/hr default · weeks Mon–Sun ({settings.timezone})
+          </div>
         </div>
-        {previewSubtotal > 0 && (
-          <form action={issueInvoice}>
-            <input type="hidden" name="clientId" value={client.id} />
-            <button className="btn-primary" type="submit">
-              Issue invoice · {formatMoney(previewSubtotal, client.currency)}
-            </button>
-          </form>
-        )}
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-3">
-        <div className="card text-center">
-          <div className="label">This week</div>
-          <div className="text-xl font-semibold">{formatDuration(thisWeekMs)}</div>
-        </div>
-        <div className="card text-center">
-          <div className="label">Unbilled</div>
-          <div className="text-xl font-semibold">{formatDuration(unbilledMs)}</div>
-        </div>
-        <div className="card text-center">
-          <div className="label">Est. amount</div>
-          <div className="text-xl font-semibold text-sky-300">{formatMoney(previewSubtotal, client.currency)}</div>
-        </div>
-      </section>
-
-      {/* Invoice preview */}
-      {(previewLines.length > 0 || oneOffs.length > 0) && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Next invoice preview</h2>
-          <div className="card">
+      {/* Per-week billing */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Bill by week (Mon–Sun)</h2>
+        {oneOffTotal > 0 && (
+          <p className="text-xs text-slate-500">
+            {formatMoney(oneOffTotal, client.currency)} of one-off charges will be added when you invoice
+            the current week.
+          </p>
+        )}
+        <div className="card overflow-x-auto">
+          {billableWeeks.length === 0 ? (
+            <div className="text-sm text-slate-400">No tracked activity yet. Run the agent to pull in time.</div>
+          ) : (
             <table className="w-full text-sm">
               <thead className="text-slate-400">
                 <tr className="text-left">
-                  <th className="pb-2">Project / item</th>
-                  <th className="pb-2 text-right">Hours</th>
-                  <th className="pb-2 text-right">Rate</th>
+                  <th className="pb-2">Week of</th>
+                  <th className="pb-2 text-right">Time</th>
                   <th className="pb-2 text-right">Amount</th>
+                  <th className="pb-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {previewLines.map((l) => (
-                  <tr key={l.label} className="border-t border-slate-800">
-                    <td className="py-2">{l.label}</td>
-                    <td className="py-2 text-right">{l.hours.toFixed(2)}</td>
-                    <td className="py-2 text-right">{formatMoney(l.ratePerHour, client.currency)}</td>
-                    <td className="py-2 text-right">{formatMoney(l.amount, client.currency)}</td>
-                  </tr>
-                ))}
-                {oneOffs.map((o) => (
-                  <tr key={o.id} className="border-t border-slate-800">
-                    <td className="py-2">{o.description} <span className="text-xs text-slate-500">(one-off)</span></td>
-                    <td className="py-2 text-right text-slate-600">—</td>
-                    <td className="py-2 text-right text-slate-600">—</td>
-                    <td className="py-2 text-right">{formatMoney(o.amount, client.currency)}</td>
-                  </tr>
-                ))}
-                <tr className="border-t border-slate-700">
-                  <td className="pt-2 font-semibold" colSpan={3}>Total</td>
-                  <td className="pt-2 text-right font-semibold">{formatMoney(previewSubtotal, client.currency)}</td>
-                </tr>
+                {billableWeeks.map((w) => {
+                  const isCurrent = w.weekKey === currentWeekKey;
+                  return (
+                    <tr key={w.weekKey} className="border-t border-slate-800">
+                      <td className="py-2">
+                        {w.weekKey}
+                        {isCurrent && <span className="ml-2 text-xs text-sky-400">this week</span>}
+                      </td>
+                      <td className="py-2 text-right">{formatDuration(w.activeMs)}</td>
+                      <td className="py-2 text-right">{formatMoney(w.amount, client.currency)}</td>
+                      <td className="py-2 text-right">
+                        {w.billed ? (
+                          <span className="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-300">invoiced</span>
+                        ) : (
+                          <form action={issueInvoice} className="inline">
+                            <input type="hidden" name="clientId" value={client.id} />
+                            <input type="hidden" name="weekStart" value={w.weekKey} />
+                            {/* One-offs ride along only with the current week's invoice. */}
+                            <input type="hidden" name="includeOneOffs" value={isCurrent ? '1' : '0'} />
+                            <button className="btn-primary" type="submit">
+                              Invoice{isCurrent && oneOffTotal > 0 ? ' + charges' : ''}
+                            </button>
+                          </form>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-            <div className="mt-2 text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per line.</div>
-          </div>
-        </section>
-      )}
-
-      {/* Weekly breakdown */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Weekly activity</h2>
-        <div className="card space-y-2">
-          {byWeek.length === 0 ? (
-            <div className="text-sm text-slate-400">No tracked activity yet.</div>
-          ) : (
-            byWeek.map((w) => (
-              <div key={w.week} className="flex items-center gap-3 text-sm">
-                <div className="w-24 text-slate-400">{w.week}</div>
-                <div className="h-3 flex-1 rounded bg-slate-800">
-                  <div className="h-3 rounded bg-sky-600" style={{ width: `${(w.ms / maxWeek) * 100}%` }} />
-                </div>
-                <div className="w-20 text-right">{formatDuration(w.ms)}</div>
-              </div>
-            ))
           )}
         </div>
+        <p className="text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per project line.</p>
       </section>
 
       {/* Folder mappings */}

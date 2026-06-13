@@ -65,6 +65,7 @@ export function InvoiceDoc({
           <View>
             <Text style={styles.title}>INVOICE</Text>
             <Text style={styles.muted}>{invoice.number}</Text>
+            {invoice.notes ? <Text style={styles.muted}>{invoice.notes}</Text> : null}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.strong}>{invoice.businessName}</Text>

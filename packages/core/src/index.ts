@@ -15,6 +15,8 @@ export {
   activeWithin,
   activeAfter,
   weekStartKey,
+  zonedDateToMs,
+  weekRange,
   aggregateIntervals,
   buildInvoiceLines,
   invoiceSubtotal,

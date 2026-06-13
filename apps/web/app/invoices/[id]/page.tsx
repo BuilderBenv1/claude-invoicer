@@ -23,6 +23,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <h1 className="text-2xl font-semibold">{invoice.number}</h1>
           <p className="text-sm text-slate-400">
             {invoice.clientName} · issued {formatDate(invoice.issuedAt, settings.timezone)}
+            {invoice.notes ? ` · ${invoice.notes}` : ''}
           </p>
         </div>
         <span
@@ -102,7 +103,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <p className="text-sm text-green-300">Paid on {formatDate(invoice.paidAt, settings.timezone)}.</p>
       )}
       <p className="text-xs text-slate-500">
-        Deleting the most recent invoice for a client restores their clock to before it was issued.
+        Deleting an invoice frees its week to be invoiced again and returns any one-off charges to unbilled.
       </p>
     </div>
   );

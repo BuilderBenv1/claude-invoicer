@@ -7,7 +7,7 @@ import { AssignFolderForm } from '@/components/assign-folder-form';
 export const dynamic = 'force-dynamic';
 
 export default async function OverviewPage() {
-  const { stats, unassigned, clients, totalUnbilledByCurrency, settings } = await getOverview();
+  const { stats, unassigned, clients, settings, currentWeekKey } = await getOverview();
   const clientOptions = clients.map((c) => ({ id: c.id, name: c.name }));
 
   return (
@@ -18,16 +18,6 @@ export default async function OverviewPage() {
           <p className="text-sm text-slate-400">
             Idle cap {settings.defaultIdleCapMin}m · rounding {settings.defaultRoundIncrementMin}m · {settings.timezone}
           </p>
-        </div>
-        <div className="text-right">
-          <div className="label">Total unbilled</div>
-          <div className="text-xl font-semibold">
-            {Object.keys(totalUnbilledByCurrency).length === 0
-              ? formatMoney(0, settings.defaultCurrency)
-              : Object.entries(totalUnbilledByCurrency)
-                  .map(([cur, amt]) => formatMoney(amt, cur))
-                  .join(' · ')}
-          </div>
         </div>
       </header>
 
@@ -40,7 +30,7 @@ export default async function OverviewPage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {stats.map(({ client, thisWeekMs, unbilledMs, estimatedAmount }) => (
+            {stats.map(({ client, thisWeekMs, thisWeekAmount, thisWeekBilled, unbilledWeeks, oneOffTotal }) => (
               <div key={client.id} className="card">
                 <div className="flex items-start justify-between">
                   <div>
@@ -51,14 +41,18 @@ export default async function OverviewPage() {
                       {formatMoney(client.hourlyRate, client.currency)}/hr default
                     </div>
                   </div>
-                  {estimatedAmount > 0 && (
+                  {thisWeekAmount > 0 && !thisWeekBilled ? (
                     <form action={issueInvoice}>
                       <input type="hidden" name="clientId" value={client.id} />
+                      <input type="hidden" name="weekStart" value={currentWeekKey} />
+                      <input type="hidden" name="includeOneOffs" value="1" />
                       <button className="btn-primary" type="submit">
-                        Issue invoice
+                        Invoice this week
                       </button>
                     </form>
-                  )}
+                  ) : thisWeekBilled ? (
+                    <span className="rounded bg-green-900/40 px-2 py-1 text-xs text-green-300">week invoiced</span>
+                  ) : null}
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                   <div>
@@ -66,15 +60,19 @@ export default async function OverviewPage() {
                     <div className="font-semibold">{formatDuration(thisWeekMs)}</div>
                   </div>
                   <div>
-                    <div className="label">Unbilled</div>
-                    <div className="font-semibold">{formatDuration(unbilledMs)}</div>
+                    <div className="label">This week $</div>
+                    <div className="font-semibold text-sky-300">{formatMoney(thisWeekAmount, client.currency)}</div>
                   </div>
                   <div>
-                    <div className="label">Est. amount</div>
-                    <div className="font-semibold text-sky-300">
-                      {formatMoney(estimatedAmount, client.currency)}
-                    </div>
+                    <div className="label">Unbilled weeks</div>
+                    <div className="font-semibold">{unbilledWeeks}</div>
                   </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                  <span>{oneOffTotal > 0 ? `+ ${formatMoney(oneOffTotal, client.currency)} one-off charges` : ''}</span>
+                  <Link href={`/clients/${client.id}`} className="hover:underline">
+                    All weeks →
+                  </Link>
                 </div>
               </div>
             ))}

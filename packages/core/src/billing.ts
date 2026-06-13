@@ -60,6 +60,57 @@ export function weekStartKey(ms: number, timeZone: string): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+/** Offset (ms) to add to a UTC instant to get wall-clock time in `timeZone`. */
+function tzOffsetMs(utcMs: number, timeZone: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const map: Record<string, string> = {};
+  for (const p of dtf.formatToParts(new Date(utcMs))) {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  }
+  let hour = Number(map.hour);
+  if (hour === 24) hour = 0; // some environments render midnight as 24
+  const asUTC = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    hour,
+    Number(map.minute),
+    Number(map.second),
+  );
+  return asUTC - utcMs;
+}
+
+/** UTC ms of local midnight for a Y/M/D in the given timezone (two-pass for DST). */
+export function zonedDateToMs(year: number, month: number, day: number, timeZone: string): number {
+  const guess = Date.UTC(year, month - 1, day);
+  let ms = guess - tzOffsetMs(guess, timeZone);
+  ms = guess - tzOffsetMs(ms, timeZone);
+  return ms;
+}
+
+/**
+ * [startMs, endMs) for the calendar week (Mon 00:00 → next Mon 00:00, local tz)
+ * identified by a Monday key "YYYY-MM-DD".
+ */
+export function weekRange(weekKey: string, timeZone: string): { startMs: number; endMs: number } {
+  const [y, m, d] = weekKey.split('-').map(Number) as [number, number, number];
+  const startMs = zonedDateToMs(y, m, d, timeZone);
+  // +7 calendar days via Date.UTC handles month/year rollover; recompute local
+  // midnight independently so DST shifts don't drift the boundary.
+  const next = new Date(Date.UTC(y, m - 1, d + 7));
+  const endMs = zonedDateToMs(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), timeZone);
+  return { startMs, endMs };
+}
+
 export interface ClientAggregate {
   /** Active ms not yet covered by an invoice (after the reset mark). */
   unbilledMs: number;

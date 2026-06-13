@@ -7,6 +7,7 @@ import {
   normalizePath,
   unassignedFolders,
   weekStartKey,
+  weekRange,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
 } from '@claude-invoicer/core';
@@ -41,11 +42,12 @@ function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
 
 async function loadAll() {
   const db = getDb();
-  const [rawIntervals, rawMappings, clientRows, oneOffs, s] = await Promise.all([
+  const [rawIntervals, rawMappings, clientRows, oneOffs, invoiceRows, s] = await Promise.all([
     db.select().from(activityIntervals),
     db.select().from(folderMappings),
     db.select().from(clients).where(eq(clients.archived, 0)),
     db.select().from(oneOffCharges),
+    db.select().from(invoices),
     getSettings(),
   ]);
   return {
@@ -54,8 +56,22 @@ async function loadAll() {
     coreMappings: rawMappings.map(toCoreMapping),
     clientRows,
     oneOffs,
+    invoiceRows,
     settings: s,
   };
+}
+
+/**
+ * Set of already-invoiced week-start ms for a client. A week invoice records its
+ * window start in `prevBilledThroughMs`, so a week is "billed" if any invoice for
+ * that client starts at that week's start.
+ */
+function billedWeekStarts(invoiceRows: Invoice[], clientId: string): Set<number> {
+  const set = new Set<number>();
+  for (const inv of invoiceRows) {
+    if (inv.clientId === clientId) set.add(inv.prevBilledThroughMs);
+  }
+  return set;
 }
 
 /** Unbilled one-off charges for a client. */
@@ -66,11 +82,61 @@ function sumAmounts(items: { amount: number }[]): number {
   return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 }
 
+export interface BillableWeek {
+  /** Monday key "YYYY-MM-DD". */
+  weekKey: string;
+  startMs: number;
+  endMs: number;
+  activeMs: number;
+  amount: number;
+  billed: boolean;
+  isCurrent: boolean;
+}
+
+/** Build the per-week billable breakdown for one client (newest first). */
+function clientWeeks(
+  ci: CoreInterval[],
+  client: Client,
+  coreMappings: CoreMapping[],
+  billed: Set<number>,
+  s: Settings,
+): BillableWeek[] {
+  const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
+  const currentKey = weekStartKey(Date.now(), s.timezone);
+  const agg = aggregateIntervals(ci, { billedThroughMs: 0, timeZone: s.timezone });
+
+  return Object.entries(agg.byWeek)
+    .map(([weekKey, activeMs]) => {
+      const { startMs, endMs } = weekRange(weekKey, s.timezone);
+      const lines = buildInvoiceLines(ci, {
+        ratePerHour: client.hourlyRate,
+        roundIncrementMin,
+        billedThroughMs: startMs,
+        cutoffMs: endMs,
+        groupBy: 'project',
+        mappings: coreMappings,
+        timeZone: s.timezone,
+      });
+      return {
+        weekKey,
+        startMs,
+        endMs,
+        activeMs,
+        amount: invoiceSubtotal(lines),
+        billed: billed.has(startMs),
+        isCurrent: weekKey === currentKey,
+      };
+    })
+    .sort((a, b) => b.startMs - a.startMs);
+}
+
 export interface ClientStat {
   client: Client;
   thisWeekMs: number;
-  unbilledMs: number;
-  estimatedAmount: number;
+  thisWeekAmount: number;
+  thisWeekBilled: boolean;
+  unbilledWeeks: number;
+  oneOffTotal: number;
   roundIncrementMin: number;
 }
 
@@ -79,49 +145,35 @@ export interface OverviewData {
   stats: ClientStat[];
   unassigned: { cwd: string; activeMs: number; lastSeenMs: number }[];
   clients: Client[];
-  totalUnbilledByCurrency: Record<string, number>;
+  currentWeekKey: string;
 }
 
 export async function getOverview(): Promise<OverviewData> {
-  const { intervals, coreMappings, clientRows, oneOffs, settings: s } = await loadAll();
-  const weekKey = weekStartKey(Date.now(), s.timezone);
-  const cutoffMs = Date.now();
+  const { intervals, coreMappings, clientRows, oneOffs, invoiceRows, settings: s } = await loadAll();
+  const currentKey = weekStartKey(Date.now(), s.timezone);
 
   const stats: ClientStat[] = clientRows.map((client) => {
     const ci = intervalsForClient(intervals, client.id, coreMappings);
-    const agg = aggregateIntervals(ci, { billedThroughMs: client.billedThroughMs, timeZone: s.timezone });
-    const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
-    const lines = buildInvoiceLines(ci, {
-      ratePerHour: client.hourlyRate,
-      roundIncrementMin,
-      billedThroughMs: client.billedThroughMs,
-      cutoffMs,
-      groupBy: 'project',
-      mappings: coreMappings,
-      timeZone: s.timezone,
-    });
-    const oneOffTotal = sumAmounts(unbilledOneOffs(oneOffs, client.id));
+    const billed = billedWeekStarts(invoiceRows, client.id);
+    const weeks = clientWeeks(ci, client, coreMappings, billed, s);
+    const current = weeks.find((w) => w.isCurrent);
     return {
       client,
-      thisWeekMs: agg.byWeek[weekKey] ?? 0,
-      unbilledMs: agg.unbilledMs,
-      estimatedAmount: invoiceSubtotal(lines) + oneOffTotal,
-      roundIncrementMin,
+      thisWeekMs: current?.activeMs ?? 0,
+      thisWeekAmount: current?.amount ?? 0,
+      thisWeekBilled: current?.billed ?? false,
+      unbilledWeeks: weeks.filter((w) => !w.billed && w.amount > 0).length,
+      oneOffTotal: sumAmounts(unbilledOneOffs(oneOffs, client.id)),
+      roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
     };
   });
 
-  const totalUnbilledByCurrency: Record<string, number> = {};
-  for (const st of stats) {
-    totalUnbilledByCurrency[st.client.currency] =
-      (totalUnbilledByCurrency[st.client.currency] ?? 0) + st.estimatedAmount;
-  }
-
   return {
     settings: s,
-    stats: stats.sort((a, b) => b.unbilledMs - a.unbilledMs),
+    stats: stats.sort((a, b) => b.thisWeekMs - a.thisWeekMs),
     unassigned: unassignedFolders(intervals, coreMappings),
     clients: clientRows,
-    totalUnbilledByCurrency,
+    currentWeekKey: currentKey,
   };
 }
 
@@ -129,57 +181,36 @@ export interface ClientDetail {
   client: Client;
   settings: Settings;
   mappings: (typeof folderMappings.$inferSelect)[];
-  byWeek: { week: string; ms: number }[];
-  unbilledMs: number;
-  thisWeekMs: number;
+  weeks: BillableWeek[];
   recentIntervals: CoreInterval[];
-  previewLines: ReturnType<typeof buildInvoiceLines>;
   oneOffs: OneOffCharge[];
-  previewSubtotal: number;
+  oneOffTotal: number;
   roundIncrementMin: number;
+  currentWeekKey: string;
 }
 
 export async function getClientDetail(clientId: string): Promise<ClientDetail | null> {
-  const { intervals, mappings, coreMappings, oneOffs, settings: s } = await loadAll();
+  const { intervals, mappings, coreMappings, oneOffs, invoiceRows, settings: s } = await loadAll();
   const db = getDb();
   const found = await db.select().from(clients).where(eq(clients.id, clientId));
   const client = found[0];
   if (!client) return null;
 
   const ci = intervalsForClient(intervals, clientId, coreMappings);
-  const agg = aggregateIntervals(ci, { billedThroughMs: client.billedThroughMs, timeZone: s.timezone });
-  const weekKey = weekStartKey(Date.now(), s.timezone);
-  const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
-  const cutoffMs = Date.now();
-  const previewLines = buildInvoiceLines(ci, {
-    ratePerHour: client.hourlyRate,
-    roundIncrementMin,
-    billedThroughMs: client.billedThroughMs,
-    cutoffMs,
-    groupBy: 'project',
-    mappings: coreMappings,
-    timeZone: s.timezone,
-  });
-
-  const byWeek = Object.entries(agg.byWeek)
-    .map(([week, ms]) => ({ week, ms }))
-    .sort((a, b) => (a.week < b.week ? 1 : -1))
-    .slice(0, 12);
-
+  const billed = billedWeekStarts(invoiceRows, clientId);
+  const weeks = clientWeeks(ci, client, coreMappings, billed, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
 
   return {
     client,
     settings: s,
     mappings: mappings.filter((m) => m.clientId === clientId),
-    byWeek,
-    unbilledMs: agg.unbilledMs,
-    thisWeekMs: agg.byWeek[weekKey] ?? 0,
+    weeks,
     recentIntervals: ci.filter((i) => i.activeMs > 0).sort((a, b) => b.endMs - a.endMs).slice(0, 25),
-    previewLines,
     oneOffs: clientOneOffs,
-    previewSubtotal: invoiceSubtotal(previewLines) + sumAmounts(clientOneOffs),
-    roundIncrementMin,
+    oneOffTotal: sumAmounts(clientOneOffs),
+    roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
+    currentWeekKey: weekStartKey(Date.now(), s.timezone),
   };
 }
 

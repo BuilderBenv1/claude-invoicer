@@ -8,6 +8,7 @@ import {
   intervalsForClient,
   invoiceSubtotal,
   normalizePath,
+  weekRange,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
 } from '@claude-invoicer/core';
@@ -190,9 +191,19 @@ export async function assignFolder(fd: FormData): Promise<void> {
 
 // ---------------- Invoices ----------------
 
+/**
+ * Issue an invoice for a single calendar week (Mon–Sun). `weekStart` is the
+ * Monday key "YYYY-MM-DD". Each week can be invoiced once per client. Unbilled
+ * one-off charges are included only when `includeOneOffs` is set (the UI defaults
+ * this on for the current week).
+ */
 export async function issueInvoice(fd: FormData): Promise<void> {
   const clientId = str(fd, 'clientId');
+  const weekStart = str(fd, 'weekStart');
+  const includeOneOffs = str(fd, 'includeOneOffs') === '1';
   if (!clientId) throw new Error('Missing client id');
+  if (!weekStart) throw new Error('Missing week');
+
   const db = getDb();
 
   const newInvoiceId = await db.transaction(async (tx) => {
@@ -200,6 +211,17 @@ export async function issueInvoice(fd: FormData): Promise<void> {
     if (!s) throw new Error('Settings not initialized');
     const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
     if (!client) throw new Error('Client not found');
+
+    const { startMs, endMs } = weekRange(weekStart, s.timezone);
+
+    // Guard: a given week can only be invoiced once per client.
+    const existing = await tx
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.clientId, clientId), eq(invoices.prevBilledThroughMs, startMs)));
+    if (existing[0]) {
+      throw new Error(`Week of ${weekStart} is already invoiced (${existing[0].number}).`);
+    }
 
     const rawMappings = await tx.select().from(folderMappings);
     const coreMappings: CoreMapping[] = rawMappings.map((m) => ({
@@ -218,29 +240,29 @@ export async function issueInvoice(fd: FormData): Promise<void> {
     }));
 
     const ci = intervalsForClient(intervals, clientId, coreMappings);
-    const cutoffMs = Date.now();
     const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
     const timeLines = buildInvoiceLines(ci, {
       ratePerHour: client.hourlyRate,
       roundIncrementMin,
-      billedThroughMs: client.billedThroughMs,
-      cutoffMs,
+      billedThroughMs: startMs, // lower bound: start of the week
+      cutoffMs: endMs, // upper bound: end of the week
       groupBy: 'project',
       mappings: coreMappings,
       timeZone: s.timezone,
     });
 
-    // Unbilled one-off charges become flat-fee lines (hours/rate = 0).
-    const charges = await tx
-      .select()
-      .from(oneOffCharges)
-      .where(and(eq(oneOffCharges.clientId, clientId), isNull(oneOffCharges.billedInvoiceId)));
+    const charges = includeOneOffs
+      ? await tx
+          .select()
+          .from(oneOffCharges)
+          .where(and(eq(oneOffCharges.clientId, clientId), isNull(oneOffCharges.billedInvoiceId)))
+      : [];
 
     const subtotal =
       invoiceSubtotal(timeLines) + Math.round(charges.reduce((sum, c) => sum + c.amount, 0) * 100) / 100;
 
     if (timeLines.length === 0 && charges.length === 0) {
-      throw new Error('Nothing to invoice: no unbilled time and no one-off charges for this client.');
+      throw new Error(`Nothing to invoice for the week of ${weekStart}.`);
     }
 
     const seq = s.invoiceSeq + 1;
@@ -254,8 +276,9 @@ export async function issueInvoice(fd: FormData): Promise<void> {
       status: 'unpaid',
       currency: client.currency,
       subtotal: Math.round(subtotal * 100) / 100,
-      prevBilledThroughMs: client.billedThroughMs,
-      cutoffMs,
+      prevBilledThroughMs: startMs, // window start (identifies the billed week)
+      cutoffMs: endMs, // window end
+      notes: `Week of ${weekStart}`,
       businessName: s.businessName,
       businessEmail: s.businessEmail,
       businessAddress: s.businessAddress,
@@ -283,13 +306,10 @@ export async function issueInvoice(fd: FormData): Promise<void> {
     ];
     await tx.insert(invoiceLines).values(allLines);
 
-    // Mark the one-off charges as billed by this invoice.
     for (const c of charges) {
       await tx.update(oneOffCharges).set({ billedInvoiceId: id }).where(eq(oneOffCharges.id, c.id));
     }
 
-    // Advance the reset mark — "reset the clock".
-    await tx.update(clients).set({ billedThroughMs: cutoffMs }).where(eq(clients.id, clientId));
     await tx.update(settings).set({ invoiceSeq: seq }).where(eq(settings.id, 1));
     return id;
   });
@@ -322,21 +342,17 @@ export async function markInvoicePaid(fd: FormData): Promise<void> {
   revalidatePath('/invoices/' + invoiceId);
 }
 
-/** Delete an invoice; if it was the client's latest, un-reset their clock. */
+/**
+ * Delete an invoice. The billed week becomes available to invoice again (weeks
+ * are derived from existing invoices), and any one-off charges it carried return
+ * to the unbilled pool.
+ */
 export async function deleteInvoice(fd: FormData): Promise<void> {
   const invoiceId = str(fd, 'invoiceId');
   const db = getDb();
   await db.transaction(async (tx) => {
     const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
     if (!inv) return;
-    const [client] = await tx.select().from(clients).where(eq(clients.id, inv.clientId));
-    if (client && client.billedThroughMs === inv.cutoffMs) {
-      await tx
-        .update(clients)
-        .set({ billedThroughMs: inv.prevBilledThroughMs })
-        .where(eq(clients.id, inv.clientId));
-    }
-    // Return any one-off charges billed by this invoice to the unbilled pool.
     await tx
       .update(oneOffCharges)
       .set({ billedInvoiceId: null })

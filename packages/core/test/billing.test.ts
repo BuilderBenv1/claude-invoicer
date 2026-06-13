@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   roundMinutesUp,
   weekStartKey,
+  weekRange,
   aggregateIntervals,
   buildInvoiceLines,
   invoiceSubtotal,
@@ -39,6 +40,34 @@ describe('weekStartKey', () => {
     expect(weekStartKey(Date.UTC(2026, 5, 14, 1, 0), 'UTC')).toBe('2026-06-08'); // Sun
     expect(weekStartKey(Date.UTC(2026, 5, 8, 0, 0), 'UTC')).toBe('2026-06-08'); // Mon
     expect(weekStartKey(Date.UTC(2026, 5, 15, 0, 0), 'UTC')).toBe('2026-06-15'); // next Mon
+  });
+});
+
+describe('weekRange', () => {
+  it('returns Mon 00:00 to next Mon 00:00 in UTC', () => {
+    const { startMs, endMs } = weekRange('2026-06-08', 'UTC');
+    expect(startMs).toBe(Date.UTC(2026, 5, 8, 0, 0, 0));
+    expect(endMs).toBe(Date.UTC(2026, 5, 15, 0, 0, 0));
+    expect(endMs - startMs).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it('honors a non-UTC timezone (week starts at local midnight)', () => {
+    // Asia/Jerusalem is UTC+3 in June (DST) -> local Mon 00:00 is Sun 21:00 UTC.
+    const { startMs } = weekRange('2026-06-08', 'Asia/Jerusalem');
+    expect(startMs).toBe(Date.UTC(2026, 5, 7, 21, 0, 0));
+  });
+
+  it('an interval is billable only within its week window', () => {
+    const { startMs, endMs } = weekRange('2026-06-08', 'UTC');
+    const inWeek = interval('C:/a', 0, 60); // Mon 09:00 UTC, inside
+    const lines = buildInvoiceLines([inWeek], {
+      ratePerHour: 60,
+      roundIncrementMin: 1,
+      billedThroughMs: startMs,
+      cutoffMs: endMs,
+      groupBy: 'total',
+    });
+    expect(lines[0]!.rawMs).toBe(60 * MIN);
   });
 });
 
