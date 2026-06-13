@@ -36,11 +36,30 @@ export const folderMappings = pgTable(
       .references(() => clients.id, { onDelete: 'cascade' }),
     path: text('path').notNull(),
     label: text('label'),
+    /** Per-folder hourly rate override; null = use the client's default rate. */
+    hourlyRate: doublePrecision('hourly_rate'),
   },
   (t) => ({
     pathUnique: uniqueIndex('folder_path_unique').on(t.path),
     clientIdx: index('folder_client_idx').on(t.clientId),
   }),
+);
+
+/** Flat one-off charges (e.g. a fixed-fee website) added to a client's next invoice. */
+export const oneOffCharges = pgTable(
+  'one_off_charges',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    description: text('description').notNull(),
+    amount: doublePrecision('amount').notNull(),
+    /** Set to the invoice id once billed; null = still unbilled. */
+    billedInvoiceId: text('billed_invoice_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ clientIdx: index('oneoff_client_idx').on(t.clientId) }),
 );
 
 /** Activity intervals uploaded by the local agent. Upsert key: (sessionId, startMs). */
@@ -130,3 +149,4 @@ export type ActivityInterval = typeof activityIntervals.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type OneOffCharge = typeof oneOffCharges.$inferSelect;

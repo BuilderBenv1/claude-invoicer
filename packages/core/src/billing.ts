@@ -89,6 +89,7 @@ export function aggregateIntervals(
 export type GroupBy = 'total' | 'project' | 'week';
 
 export interface InvoiceLineInput {
+  /** Default hourly rate; per-folder mapping rates override it when present. */
   ratePerHour: number;
   roundIncrementMin: number;
   /** Reset mark: only time after this is billed. */
@@ -97,7 +98,7 @@ export interface InvoiceLineInput {
   cutoffMs: number;
   groupBy?: GroupBy;
   timeZone?: string;
-  /** Used to label lines when grouping by project. */
+  /** Used to label lines and resolve per-folder rates when grouping by project. */
   mappings?: FolderMapping[];
 }
 
@@ -126,21 +127,30 @@ export function buildInvoiceLines(
     mappings = [],
   } = input;
 
-  const groups = new Map<string, number>();
+  const groups = new Map<string, { ms: number; rate: number }>();
   for (const it of intervals) {
     const ms = activeWithin(it, billedThroughMs, cutoffMs);
     if (ms <= 0) continue;
     let label: string;
-    if (groupBy === 'week') label = `Week of ${weekStartKey(it.startMs, timeZone)}`;
-    else if (groupBy === 'project') label = projectLabel(it.cwd, mappings);
-    else label = 'Development work';
-    groups.set(label, (groups.get(label) ?? 0) + ms);
+    let rate = ratePerHour;
+    if (groupBy === 'week') {
+      label = `Week of ${weekStartKey(it.startMs, timeZone)}`;
+    } else if (groupBy === 'project') {
+      const m = matchMapping(it.cwd, mappings);
+      label = m ? m.label ?? basename(m.path) : basename(it.cwd);
+      rate = m?.ratePerHour ?? ratePerHour;
+    } else {
+      label = 'Development work';
+    }
+    const g = groups.get(label);
+    if (g) g.ms += ms;
+    else groups.set(label, { ms, rate });
   }
 
   const lines: InvoiceLine[] = [];
-  for (const [label, ms] of groups) {
+  for (const [label, { ms, rate }] of groups) {
     const hours = round2(roundMinutesUp(ms, roundIncrementMin) / 60);
-    lines.push({ label, rawMs: ms, hours, ratePerHour, amount: round2(hours * ratePerHour) });
+    lines.push({ label, rawMs: ms, hours, ratePerHour: rate, amount: round2(hours * rate) });
   }
   lines.sort((a, b) => (a.label < b.label ? -1 : 1));
   return lines;
@@ -148,12 +158,6 @@ export function buildInvoiceLines(
 
 export function invoiceSubtotal(lines: InvoiceLine[]): number {
   return round2(lines.reduce((s, l) => s + l.amount, 0));
-}
-
-function projectLabel(cwd: string, mappings: FolderMapping[]): string {
-  const m = matchMapping(cwd, mappings);
-  if (m) return m.label ?? basename(m.path);
-  return basename(cwd);
 }
 
 /** Intervals that belong to a given client under the supplied mappings. */

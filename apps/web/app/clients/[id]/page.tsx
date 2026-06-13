@@ -5,7 +5,10 @@ import { formatDuration, formatMoney, formatDate } from '@/lib/format';
 import {
   updateClient,
   addMapping,
+  updateMapping,
   removeMapping,
+  addOneOff,
+  removeOneOff,
   issueInvoice,
   archiveClient,
 } from '@/lib/actions';
@@ -17,7 +20,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const detail = await getClientDetail(id);
   if (!detail) notFound();
 
-  const { client, mappings, byWeek, unbilledMs, thisWeekMs, previewLines, previewSubtotal, recentIntervals, settings, roundIncrementMin } = detail;
+  const { client, mappings, byWeek, unbilledMs, thisWeekMs, previewLines, oneOffs, previewSubtotal, recentIntervals, settings, roundIncrementMin } = detail;
   const maxWeek = Math.max(1, ...byWeek.map((w) => w.ms));
 
   return (
@@ -29,7 +32,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           </Link>
           <h1 className="text-2xl font-semibold">{client.name}</h1>
         </div>
-        {unbilledMs > 0 && (
+        {previewSubtotal > 0 && (
           <form action={issueInvoice}>
             <input type="hidden" name="clientId" value={client.id} />
             <button className="btn-primary" type="submit">
@@ -55,14 +58,14 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       </section>
 
       {/* Invoice preview */}
-      {previewLines.length > 0 && (
+      {(previewLines.length > 0 || oneOffs.length > 0) && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Next invoice preview</h2>
           <div className="card">
             <table className="w-full text-sm">
               <thead className="text-slate-400">
                 <tr className="text-left">
-                  <th className="pb-2">Project</th>
+                  <th className="pb-2">Project / item</th>
                   <th className="pb-2 text-right">Hours</th>
                   <th className="pb-2 text-right">Rate</th>
                   <th className="pb-2 text-right">Amount</th>
@@ -77,9 +80,21 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                     <td className="py-2 text-right">{formatMoney(l.amount, client.currency)}</td>
                   </tr>
                 ))}
+                {oneOffs.map((o) => (
+                  <tr key={o.id} className="border-t border-slate-800">
+                    <td className="py-2">{o.description} <span className="text-xs text-slate-500">(one-off)</span></td>
+                    <td className="py-2 text-right text-slate-600">—</td>
+                    <td className="py-2 text-right text-slate-600">—</td>
+                    <td className="py-2 text-right">{formatMoney(o.amount, client.currency)}</td>
+                  </tr>
+                ))}
+                <tr className="border-t border-slate-700">
+                  <td className="pt-2 font-semibold" colSpan={3}>Total</td>
+                  <td className="pt-2 text-right font-semibold">{formatMoney(previewSubtotal, client.currency)}</td>
+                </tr>
               </tbody>
             </table>
-            <div className="mt-2 text-xs text-slate-500">Rounded up to {roundIncrementMin} min per line.</div>
+            <div className="mt-2 text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per line.</div>
           </div>
         </section>
       )}
@@ -106,36 +121,88 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
 
       {/* Folder mappings */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Folders (and subfolders) for this client</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Folders for this client</h2>
+        <p className="text-xs text-slate-500">
+          Each folder (and its subfolders) can have its own hourly rate — leave Rate blank to use the
+          client default ({formatMoney(client.hourlyRate, client.currency)}/hr).
+        </p>
         <div className="space-y-2">
           {mappings.map((m) => (
-            <div key={m.id} className="card flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
+            <div key={m.id} className="card flex flex-wrap items-end gap-2 py-3">
+              <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-sm">{m.path}</div>
-                {m.label && <div className="text-xs text-slate-500">{m.label}</div>}
               </div>
+              <form action={updateMapping} className="flex flex-wrap items-end gap-2">
+                <input type="hidden" name="id" value={m.id} />
+                <input type="hidden" name="clientId" value={client.id} />
+                <div className="w-36">
+                  <label className="label">Label</label>
+                  <input name="label" defaultValue={m.label ?? ''} className="input" />
+                </div>
+                <div className="w-24">
+                  <label className="label">Rate/hr</label>
+                  <input name="hourlyRate" type="number" step="0.01" defaultValue={m.hourlyRate ?? ''} placeholder="default" className="input" />
+                </div>
+                <button className="btn-ghost" type="submit">Save</button>
+              </form>
               <form action={removeMapping}>
                 <input type="hidden" name="id" value={m.id} />
                 <input type="hidden" name="clientId" value={client.id} />
-                <button className="btn-danger" type="submit">
-                  Remove
-                </button>
+                <button className="btn-danger" type="submit">Remove</button>
               </form>
             </div>
           ))}
           <form action={addMapping} className="card flex flex-wrap items-end gap-2">
             <input type="hidden" name="clientId" value={client.id} />
-            <div className="flex-1 min-w-[16rem]">
+            <div className="flex-1 min-w-[14rem]">
               <label className="label">Folder path</label>
               <input name="path" placeholder="C:\Users\you\work\acme" className="input" required />
             </div>
-            <div className="w-40">
+            <div className="w-36">
               <label className="label">Label (optional)</label>
               <input name="label" className="input" />
             </div>
-            <button className="btn-ghost" type="submit">
-              Add folder
-            </button>
+            <div className="w-24">
+              <label className="label">Rate/hr</label>
+              <input name="hourlyRate" type="number" step="0.01" placeholder="default" className="input" />
+            </div>
+            <button className="btn-ghost" type="submit">Add folder</button>
+          </form>
+        </div>
+      </section>
+
+      {/* One-off charges */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">One-off charges</h2>
+        <p className="text-xs text-slate-500">
+          Flat fees not based on tracked time (e.g. a fixed-price website). These are added to the
+          next invoice you issue for this client.
+        </p>
+        <div className="space-y-2">
+          {oneOffs.map((o) => (
+            <div key={o.id} className="card flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <div className="truncate">{o.description}</div>
+                <div className="text-xs text-slate-500">{formatMoney(o.amount, client.currency)}</div>
+              </div>
+              <form action={removeOneOff}>
+                <input type="hidden" name="id" value={o.id} />
+                <input type="hidden" name="clientId" value={client.id} />
+                <button className="btn-danger" type="submit">Remove</button>
+              </form>
+            </div>
+          ))}
+          <form action={addOneOff} className="card flex flex-wrap items-end gap-2">
+            <input type="hidden" name="clientId" value={client.id} />
+            <div className="flex-1 min-w-[14rem]">
+              <label className="label">Description</label>
+              <input name="description" placeholder="Website build (fixed fee)" className="input" required />
+            </div>
+            <div className="w-32">
+              <label className="label">Amount ({client.currency})</label>
+              <input name="amount" type="number" step="0.01" className="input" required />
+            </div>
+            <button className="btn-ghost" type="submit">Add charge</button>
           </form>
         </div>
       </section>

@@ -48,10 +48,10 @@ export default async function OverviewPage() {
                       {client.name}
                     </Link>
                     <div className="text-xs text-slate-500">
-                      {formatMoney(client.hourlyRate, client.currency)}/hr
+                      {formatMoney(client.hourlyRate, client.currency)}/hr default
                     </div>
                   </div>
-                  {unbilledMs > 0 && (
+                  {estimatedAmount > 0 && (
                     <form action={issueInvoice}>
                       <input type="hidden" name="clientId" value={client.id} />
                       <button className="btn-primary" type="submit">

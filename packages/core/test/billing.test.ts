@@ -106,6 +106,34 @@ describe('buildInvoiceLines', () => {
     expect(lines.every((l) => l.hours === 0.5)).toBe(true);
   });
 
+  it('applies per-folder rate overrides, falling back to the default', () => {
+    const mappings: FolderMapping[] = [
+      { clientId: 'c', path: 'C:/work/site', label: 'Website', ratePerHour: 50 },
+      { clientId: 'c', path: 'C:/work/api', label: 'API', ratePerHour: 30 },
+      { clientId: 'c', path: 'C:/work/misc', label: 'Misc' }, // no override -> default
+    ];
+    const intervals = [
+      interval('C:/work/site/x', 0, 60),
+      interval('C:/work/api/y', 100, 60),
+      interval('C:/work/misc/z', 200, 60),
+    ];
+    const lines = buildInvoiceLines(intervals, {
+      ratePerHour: 100,
+      roundIncrementMin: 15,
+      billedThroughMs: 0,
+      cutoffMs: Number.POSITIVE_INFINITY,
+      groupBy: 'project',
+      mappings,
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel['Website']!.ratePerHour).toBe(50);
+    expect(byLabel['Website']!.amount).toBe(50);
+    expect(byLabel['API']!.ratePerHour).toBe(30);
+    expect(byLabel['API']!.amount).toBe(30);
+    expect(byLabel['Misc']!.ratePerHour).toBe(100);
+    expect(byLabel['Misc']!.amount).toBe(100);
+  });
+
   it('only bills time within (billedThrough, cutoff]', () => {
     const intervals = [interval('C:/a', 0, 60)]; // 09:00-10:00, 60 min
     const lines = buildInvoiceLines(intervals, {

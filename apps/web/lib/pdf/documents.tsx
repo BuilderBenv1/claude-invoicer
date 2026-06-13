@@ -95,14 +95,17 @@ export function InvoiceDoc({
             <Text style={[styles.cNum, styles.strong]}>Rate</Text>
             <Text style={[styles.cAmt, styles.strong]}>Amount</Text>
           </View>
-          {lines.map((l) => (
-            <View style={styles.td} key={l.id}>
-              <Text style={styles.cDesc}>{l.label}</Text>
-              <Text style={styles.cNum}>{l.hours.toFixed(2)}</Text>
-              <Text style={styles.cNum}>{money(l.ratePerHour, invoice.currency)}</Text>
-              <Text style={styles.cAmt}>{money(l.amount, invoice.currency)}</Text>
-            </View>
-          ))}
+          {lines.map((l) => {
+            const flat = l.hours === 0 && l.ratePerHour === 0;
+            return (
+              <View style={styles.td} key={l.id}>
+                <Text style={styles.cDesc}>{l.label}</Text>
+                <Text style={styles.cNum}>{flat ? '—' : l.hours.toFixed(2)}</Text>
+                <Text style={styles.cNum}>{flat ? '—' : money(l.ratePerHour, invoice.currency)}</Text>
+                <Text style={styles.cAmt}>{money(l.amount, invoice.currency)}</Text>
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.totalRow}>

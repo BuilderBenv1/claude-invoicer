@@ -29,4 +29,6 @@ export interface FolderMapping {
   path: string;
   /** Optional display label for invoice line grouping. */
   label?: string;
+  /** Optional per-folder hourly rate; falls back to the client default. */
+  ratePerHour?: number;
 }

@@ -47,14 +47,17 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </tr>
           </thead>
           <tbody>
-            {lines.map((l) => (
-              <tr key={l.id} className="border-t border-slate-800">
-                <td className="py-2">{l.label}</td>
-                <td className="py-2 text-right">{l.hours.toFixed(2)}</td>
-                <td className="py-2 text-right">{formatMoney(l.ratePerHour, invoice.currency)}</td>
-                <td className="py-2 text-right">{formatMoney(l.amount, invoice.currency)}</td>
-              </tr>
-            ))}
+            {lines.map((l) => {
+              const flat = l.hours === 0 && l.ratePerHour === 0;
+              return (
+                <tr key={l.id} className="border-t border-slate-800">
+                  <td className="py-2">{l.label}</td>
+                  <td className="py-2 text-right">{flat ? '—' : l.hours.toFixed(2)}</td>
+                  <td className="py-2 text-right">{flat ? '—' : formatMoney(l.ratePerHour, invoice.currency)}</td>
+                  <td className="py-2 text-right">{formatMoney(l.amount, invoice.currency)}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-700">

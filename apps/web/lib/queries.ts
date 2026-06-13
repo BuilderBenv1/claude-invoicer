@@ -17,10 +17,12 @@ import {
   folderMappings,
   invoiceLines,
   invoices,
+  oneOffCharges,
   receipts,
   type Client,
   type Invoice,
   type InvoiceLine,
+  type OneOffCharge,
   type Settings,
 } from './db/schema';
 import { getSettings } from './settings';
@@ -29,15 +31,21 @@ function toCoreInterval(r: typeof activityIntervals.$inferSelect): CoreInterval 
   return { sessionId: r.sessionId, cwd: r.cwd, startMs: r.startMs, endMs: r.endMs, activeMs: r.activeMs };
 }
 function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
-  return { clientId: m.clientId, path: m.path, label: m.label ?? undefined };
+  return {
+    clientId: m.clientId,
+    path: m.path,
+    label: m.label ?? undefined,
+    ratePerHour: m.hourlyRate ?? undefined,
+  };
 }
 
 async function loadAll() {
   const db = getDb();
-  const [rawIntervals, rawMappings, clientRows, s] = await Promise.all([
+  const [rawIntervals, rawMappings, clientRows, oneOffs, s] = await Promise.all([
     db.select().from(activityIntervals),
     db.select().from(folderMappings),
     db.select().from(clients).where(eq(clients.archived, 0)),
+    db.select().from(oneOffCharges),
     getSettings(),
   ]);
   return {
@@ -45,8 +53,17 @@ async function loadAll() {
     mappings: rawMappings,
     coreMappings: rawMappings.map(toCoreMapping),
     clientRows,
+    oneOffs,
     settings: s,
   };
+}
+
+/** Unbilled one-off charges for a client. */
+function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharge[] {
+  return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
+}
+function sumAmounts(items: { amount: number }[]): number {
+  return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 }
 
 export interface ClientStat {
@@ -66,7 +83,7 @@ export interface OverviewData {
 }
 
 export async function getOverview(): Promise<OverviewData> {
-  const { intervals, coreMappings, clientRows, settings: s } = await loadAll();
+  const { intervals, coreMappings, clientRows, oneOffs, settings: s } = await loadAll();
   const weekKey = weekStartKey(Date.now(), s.timezone);
   const cutoffMs = Date.now();
 
@@ -83,11 +100,12 @@ export async function getOverview(): Promise<OverviewData> {
       mappings: coreMappings,
       timeZone: s.timezone,
     });
+    const oneOffTotal = sumAmounts(unbilledOneOffs(oneOffs, client.id));
     return {
       client,
       thisWeekMs: agg.byWeek[weekKey] ?? 0,
       unbilledMs: agg.unbilledMs,
-      estimatedAmount: invoiceSubtotal(lines),
+      estimatedAmount: invoiceSubtotal(lines) + oneOffTotal,
       roundIncrementMin,
     };
   });
@@ -116,12 +134,13 @@ export interface ClientDetail {
   thisWeekMs: number;
   recentIntervals: CoreInterval[];
   previewLines: ReturnType<typeof buildInvoiceLines>;
+  oneOffs: OneOffCharge[];
   previewSubtotal: number;
   roundIncrementMin: number;
 }
 
 export async function getClientDetail(clientId: string): Promise<ClientDetail | null> {
-  const { intervals, mappings, coreMappings, settings: s } = await loadAll();
+  const { intervals, mappings, coreMappings, oneOffs, settings: s } = await loadAll();
   const db = getDb();
   const found = await db.select().from(clients).where(eq(clients.id, clientId));
   const client = found[0];
@@ -147,6 +166,8 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
     .sort((a, b) => (a.week < b.week ? 1 : -1))
     .slice(0, 12);
 
+  const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
+
   return {
     client,
     settings: s,
@@ -156,7 +177,8 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
     thisWeekMs: agg.byWeek[weekKey] ?? 0,
     recentIntervals: ci.filter((i) => i.activeMs > 0).sort((a, b) => b.endMs - a.endMs).slice(0, 25),
     previewLines,
-    previewSubtotal: invoiceSubtotal(previewLines),
+    oneOffs: clientOneOffs,
+    previewSubtotal: invoiceSubtotal(previewLines) + sumAmounts(clientOneOffs),
     roundIncrementMin,
   };
 }

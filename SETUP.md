@@ -71,6 +71,9 @@ npm --prefix apps/web run db:migrate
 
 (Or just `npm --prefix apps/web run db:push` to push the schema directly.)
 
+> After pulling code updates that change the schema, re-run `npm --prefix apps/web run db:migrate`
+> to apply any new migrations (it only runs ones not yet applied).
+
 ---
 
 ## 5. Install the local agent (the part that does the tracking)
