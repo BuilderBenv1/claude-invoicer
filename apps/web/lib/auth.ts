@@ -2,11 +2,19 @@ import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
 /**
- * Single-user Google auth. Only OWNER_EMAIL may sign in; everyone else is
- * rejected at the signIn callback. JWT sessions (no DB adapter needed).
+ * Google auth gated by an email allowlist. OWNER_EMAIL is a comma-separated
+ * list of allowed addresses (one for single-user, several to share). JWT
+ * sessions (no DB adapter needed). Nothing personal is hardcoded — each
+ * deployment sets its own OWNER_EMAIL.
  *
  * Required env: AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, OWNER_EMAIL.
  */
+const allowedEmails = (process.env.OWNER_EMAIL ?? '')
+  .toLowerCase()
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Vercel sets the host; trust it so the callback URL resolves correctly.
   trustHost: true,
@@ -23,10 +31,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: 'jwt' },
   callbacks: {
     signIn({ profile }) {
-      const owner = process.env.OWNER_EMAIL?.toLowerCase().trim();
-      if (!owner) return true; // not configured -> allow (local/dev)
+      if (allowedEmails.length === 0) return true; // not configured -> allow (local/dev)
       const email = profile?.email?.toLowerCase().trim();
-      return email === owner;
+      return !!email && allowedEmails.includes(email);
     },
     authorized({ auth: session }) {
       return !!session?.user;
