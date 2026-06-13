@@ -8,6 +8,9 @@ import {
   unassignedFolders,
   weekStartKey,
   weekRange,
+  activeWithin,
+  matchMapping,
+  basename,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
 } from '@claude-invoicer/core';
@@ -211,6 +214,102 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
     oneOffTotal: sumAmounts(clientOneOffs),
     roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
     currentWeekKey: weekStartKey(Date.now(), s.timezone),
+  };
+}
+
+export interface WeekSession {
+  cwd: string;
+  folderLabel: string;
+  startMs: number;
+  endMs: number;
+  activeMs: number;
+}
+
+export interface WeekFolderGroup {
+  label: string;
+  cwd: string;
+  activeMs: number;
+  sessions: WeekSession[];
+}
+
+export interface WeekDetail {
+  client: Client;
+  settings: Settings;
+  weekKey: string;
+  startMs: number;
+  endMs: number;
+  lines: ReturnType<typeof buildInvoiceLines>;
+  subtotal: number;
+  groups: WeekFolderGroup[];
+  sessionCount: number;
+  billed: boolean;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  roundIncrementMin: number;
+}
+
+/** Full drill-down of one client's week: invoice lines + the sessions behind them. */
+export async function getWeekDetail(clientId: string, weekKey: string): Promise<WeekDetail | null> {
+  const { intervals, coreMappings, invoiceRows, settings: s } = await loadAll();
+  const db = getDb();
+  const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
+  if (!client) return null;
+
+  const { startMs, endMs } = weekRange(weekKey, s.timezone);
+  const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
+  const ci = intervalsForClient(intervals, clientId, coreMappings);
+
+  const lines = buildInvoiceLines(ci, {
+    ratePerHour: client.hourlyRate,
+    roundIncrementMin,
+    billedThroughMs: startMs,
+    cutoffMs: endMs,
+    groupBy: 'project',
+    mappings: coreMappings,
+    timeZone: s.timezone,
+  });
+
+  // Build the session list within this week, grouped by folder.
+  const groupMap = new Map<string, WeekFolderGroup>();
+  for (const it of ci) {
+    const ms = activeWithin(it, startMs, endMs);
+    if (ms <= 0) continue;
+    const m = matchMapping(it.cwd, coreMappings);
+    const label = m ? m.label ?? basename(m.path) : basename(it.cwd);
+    const session: WeekSession = {
+      cwd: it.cwd,
+      folderLabel: label,
+      startMs: Math.max(it.startMs, startMs),
+      endMs: Math.min(it.endMs, endMs),
+      activeMs: ms,
+    };
+    const g = groupMap.get(label);
+    if (g) {
+      g.activeMs += ms;
+      g.sessions.push(session);
+    } else {
+      groupMap.set(label, { label, cwd: it.cwd, activeMs: ms, sessions: [session] });
+    }
+  }
+  const groups = [...groupMap.values()].sort((a, b) => b.activeMs - a.activeMs);
+  for (const g of groups) g.sessions.sort((a, b) => a.startMs - b.startMs);
+
+  const invoice = invoiceRows.find((inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs);
+
+  return {
+    client,
+    settings: s,
+    weekKey,
+    startMs,
+    endMs,
+    lines,
+    subtotal: invoiceSubtotal(lines),
+    groups,
+    sessionCount: groups.reduce((n, g) => n + g.sessions.length, 0),
+    billed: !!invoice,
+    invoiceId: invoice?.id ?? null,
+    invoiceNumber: invoice?.number ?? null,
+    roundIncrementMin,
   };
 }
 

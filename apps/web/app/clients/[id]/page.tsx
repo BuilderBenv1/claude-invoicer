@@ -65,7 +65,9 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                   return (
                     <tr key={w.weekKey} className="border-t border-slate-800">
                       <td className="py-2">
-                        {w.weekKey}
+                        <Link href={`/clients/${client.id}/week/${w.weekKey}`} className="hover:underline">
+                          {w.weekKey}
+                        </Link>
                         {isCurrent && <span className="ml-2 text-xs text-sky-400">this week</span>}
                       </td>
                       <td className="py-2 text-right">{formatDuration(w.activeMs)}</td>
