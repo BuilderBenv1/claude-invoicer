@@ -88,6 +88,25 @@ export async function archiveClient(fd: FormData): Promise<void> {
   redirect('/');
 }
 
+/**
+ * Set (or clear) a client's "bill from" cutoff — time before it is excluded from
+ * all estimates and invoices. mode: 'now' uses the current instant, 'set' uses
+ * the supplied epoch ms (computed in the user's browser), 'clear' removes it.
+ */
+export async function setBillFrom(fd: FormData): Promise<void> {
+  const clientId = str(fd, 'clientId');
+  if (!clientId) throw new Error('Missing client id');
+  const mode = str(fd, 'mode');
+  let ms = 0;
+  if (mode === 'now') ms = Date.now();
+  else if (mode === 'set') ms = Math.max(0, Number(str(fd, 'ms')) || 0);
+  // mode === 'clear' -> 0
+  const db = getDb();
+  await db.update(clients).set({ billedThroughMs: ms }).where(eq(clients.id, clientId));
+  revalidatePath('/');
+  revalidatePath('/clients/' + clientId);
+}
+
 // ---------------- Folder mappings ----------------
 
 export async function addMapping(fd: FormData): Promise<void> {
@@ -241,10 +260,12 @@ export async function issueInvoice(fd: FormData): Promise<void> {
 
     const ci = intervalsForClient(intervals, clientId, coreMappings);
     const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
+    // Respect the client's "bill from" cutoff (stored in billed_through_ms).
+    const lower = Math.max(startMs, client.billedThroughMs ?? 0);
     const timeLines = buildInvoiceLines(ci, {
       ratePerHour: client.hourlyRate,
       roundIncrementMin,
-      billedThroughMs: startMs, // lower bound: start of the week
+      billedThroughMs: lower, // lower bound: max(week start, bill-from cutoff)
       cutoffMs: endMs, // upper bound: end of the week
       groupBy: 'project',
       mappings: coreMappings,

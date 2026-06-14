@@ -96,6 +96,14 @@ export interface BillableWeek {
   isCurrent: boolean;
 }
 
+/**
+ * The client's "bill from" cutoff (epoch ms): activity before it is never billed.
+ * Stored in the (otherwise unused) billed_through_ms column. 0 = no cutoff.
+ */
+export function billFromMs(client: Client): number {
+  return client.billedThroughMs ?? 0;
+}
+
 /** Build the per-week billable breakdown for one client (newest first). */
 function clientWeeks(
   ci: CoreInterval[],
@@ -106,15 +114,19 @@ function clientWeeks(
 ): BillableWeek[] {
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
   const currentKey = weekStartKey(Date.now(), s.timezone);
+  const cutoff = billFromMs(client);
   const agg = aggregateIntervals(ci, { billedThroughMs: 0, timeZone: s.timezone });
 
-  return Object.entries(agg.byWeek)
-    .map(([weekKey, activeMs]) => {
+  return Object.keys(agg.byWeek)
+    .map((weekKey) => {
       const { startMs, endMs } = weekRange(weekKey, s.timezone);
+      const lower = Math.max(startMs, cutoff); // exclude pre-cutoff time
+      let activeMs = 0;
+      for (const it of ci) activeMs += activeWithin(it, lower, endMs);
       const lines = buildInvoiceLines(ci, {
         ratePerHour: client.hourlyRate,
         roundIncrementMin,
-        billedThroughMs: startMs,
+        billedThroughMs: lower,
         cutoffMs: endMs,
         groupBy: 'project',
         mappings: coreMappings,
@@ -256,13 +268,14 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   if (!client) return null;
 
   const { startMs, endMs } = weekRange(weekKey, s.timezone);
+  const lower = Math.max(startMs, billFromMs(client)); // exclude pre-cutoff time
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
   const ci = intervalsForClient(intervals, clientId, coreMappings);
 
   const lines = buildInvoiceLines(ci, {
     ratePerHour: client.hourlyRate,
     roundIncrementMin,
-    billedThroughMs: startMs,
+    billedThroughMs: lower,
     cutoffMs: endMs,
     groupBy: 'project',
     mappings: coreMappings,
@@ -272,14 +285,14 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   // Build the session list within this week, grouped by folder.
   const groupMap = new Map<string, WeekFolderGroup>();
   for (const it of ci) {
-    const ms = activeWithin(it, startMs, endMs);
+    const ms = activeWithin(it, lower, endMs);
     if (ms <= 0) continue;
     const m = matchMapping(it.cwd, coreMappings);
     const label = m ? m.label ?? basename(m.path) : basename(it.cwd);
     const session: WeekSession = {
       cwd: it.cwd,
       folderLabel: label,
-      startMs: Math.max(it.startMs, startMs),
+      startMs: Math.max(it.startMs, lower),
       endMs: Math.min(it.endMs, endMs),
       activeMs: ms,
     };

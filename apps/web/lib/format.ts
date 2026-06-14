@@ -32,6 +32,18 @@ export function formatDate(d: Date | string | number, timeZone = 'UTC'): string 
   }).format(date);
 }
 
+/** "Jun 14, 14:30" — date + clock time in the given timezone. */
+export function formatDateTime(ms: number, timeZone = 'UTC'): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(ms));
+}
+
 /** "Mon, Jun 08" — day-of-week + short date in the given timezone. */
 export function formatDayLabel(ms: number, timeZone = 'UTC'): string {
   return new Intl.DateTimeFormat('en-US', {

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getClientDetail } from '@/lib/queries';
-import { formatDuration, formatMoney, formatDate } from '@/lib/format';
+import { formatDuration, formatMoney, formatDate, formatDateTime } from '@/lib/format';
 import {
   updateClient,
   addMapping,
@@ -12,6 +12,7 @@ import {
   issueInvoice,
   archiveClient,
 } from '@/lib/actions';
+import { BillFromForm } from '@/components/bill-from-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,6 +96,23 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           )}
         </div>
         <p className="text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per project line.</p>
+      </section>
+
+      {/* Bill-from cutoff */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Bill-from cutoff</h2>
+        <p className="text-xs text-slate-500">
+          Exclude tracked time before a chosen moment (e.g. a non-billable call, manual review, or an
+          agent run). Everything before the cutoff is dropped from estimates and invoices.
+        </p>
+        {client.billedThroughMs > 0 ? (
+          <p className="text-sm text-amber-300">
+            Currently excluding all time before {formatDateTime(client.billedThroughMs, settings.timezone)} ({settings.timezone}).
+          </p>
+        ) : (
+          <p className="text-sm text-slate-400">No cutoff — all tracked time is billable.</p>
+        )}
+        <BillFromForm clientId={client.id} />
       </section>
 
       {/* Folder mappings */}
