@@ -98,54 +98,47 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         <p className="text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per project line.</p>
       </section>
 
-      {/* Bill-from cutoff */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Bill-from cutoff</h2>
-        <p className="text-xs text-slate-500">
-          Exclude tracked time before a chosen moment (e.g. a non-billable call, manual review, or an
-          agent run). Everything before the cutoff is dropped from estimates and invoices.
-        </p>
-        {client.billedThroughMs > 0 ? (
-          <p className="text-sm text-amber-300">
-            Currently excluding all time before {formatDateTime(client.billedThroughMs, settings.timezone)} ({settings.timezone}).
-          </p>
-        ) : (
-          <p className="text-sm text-slate-400">No cutoff — all tracked time is billable.</p>
-        )}
-        <BillFromForm clientId={client.id} />
-      </section>
-
       {/* Folder mappings */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Folders for this client</h2>
         <p className="text-xs text-slate-500">
-          Each folder (and its subfolders) can have its own hourly rate — leave Rate blank to use the
-          client default ({formatMoney(client.hourlyRate, client.currency)}/hr).
+          Each folder (and its subfolders) can have its own hourly rate (blank = client default
+          {' '}{formatMoney(client.hourlyRate, client.currency)}/hr) and its own “bill from” cutoff to
+          exclude earlier time (e.g. a non-billable call, manual review, or an agent run) — without
+          touching the client’s other folders.
         </p>
         <div className="space-y-2">
           {mappings.map((m) => (
-            <div key={m.id} className="card flex flex-wrap items-end gap-2 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-sm">{m.path}</div>
+            <div key={m.id} className="card space-y-2 py-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-sm">{m.path}</div>
+                  {m.billFromMs > 0 && (
+                    <div className="text-xs text-amber-300">
+                      excluding time before {formatDateTime(m.billFromMs, settings.timezone)} ({settings.timezone})
+                    </div>
+                  )}
+                </div>
+                <form action={updateMapping} className="flex flex-wrap items-end gap-2">
+                  <input type="hidden" name="id" value={m.id} />
+                  <input type="hidden" name="clientId" value={client.id} />
+                  <div className="w-36">
+                    <label className="label">Label</label>
+                    <input name="label" defaultValue={m.label ?? ''} className="input" />
+                  </div>
+                  <div className="w-24">
+                    <label className="label">Rate/hr</label>
+                    <input name="hourlyRate" type="number" step="0.01" defaultValue={m.hourlyRate ?? ''} placeholder="default" className="input" />
+                  </div>
+                  <button className="btn-ghost" type="submit">Save</button>
+                </form>
+                <form action={removeMapping}>
+                  <input type="hidden" name="id" value={m.id} />
+                  <input type="hidden" name="clientId" value={client.id} />
+                  <button className="btn-danger" type="submit">Remove</button>
+                </form>
               </div>
-              <form action={updateMapping} className="flex flex-wrap items-end gap-2">
-                <input type="hidden" name="id" value={m.id} />
-                <input type="hidden" name="clientId" value={client.id} />
-                <div className="w-36">
-                  <label className="label">Label</label>
-                  <input name="label" defaultValue={m.label ?? ''} className="input" />
-                </div>
-                <div className="w-24">
-                  <label className="label">Rate/hr</label>
-                  <input name="hourlyRate" type="number" step="0.01" defaultValue={m.hourlyRate ?? ''} placeholder="default" className="input" />
-                </div>
-                <button className="btn-ghost" type="submit">Save</button>
-              </form>
-              <form action={removeMapping}>
-                <input type="hidden" name="id" value={m.id} />
-                <input type="hidden" name="clientId" value={client.id} />
-                <button className="btn-danger" type="submit">Remove</button>
-              </form>
+              <BillFromForm mappingId={m.id} clientId={client.id} />
             </div>
           ))}
           <form action={addMapping} className="card flex flex-wrap items-end gap-2">

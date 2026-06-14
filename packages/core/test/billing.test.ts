@@ -7,6 +7,7 @@ import {
   buildInvoiceLines,
   invoiceSubtotal,
   activeAfter,
+  applyFolderCutoffs,
   intervalsForClient,
   unassignedFolders,
 } from '../src/billing.js';
@@ -189,6 +190,33 @@ describe('multi-invoice reset', () => {
     // billed_through advances to firstCutoff; second invoice bills the remainder
     const agg2 = aggregateIntervals(intervals, { billedThroughMs: firstCutoff, timeZone: 'UTC' });
     expect(agg2.unbilledMs).toBe(60 * MIN);
+  });
+});
+
+describe('applyFolderCutoffs', () => {
+  it('clips only the targeted folder, leaving others intact', () => {
+    const cutoff = MON + 30 * MIN;
+    const mappings: FolderMapping[] = [
+      { clientId: 'c', path: 'C:/work/site', billFromMs: cutoff }, // cut this folder
+      { clientId: 'c', path: 'C:/work/api' }, // leave this one
+    ];
+    const intervals = [
+      interval('C:/work/site/x', 0, 60), // 09:00-10:00 -> clipped to 09:30-10:00
+      interval('C:/work/api/y', 0, 60), // untouched
+    ];
+    const out = applyFolderCutoffs(intervals, mappings);
+    const site = out.find((i) => i.cwd.includes('site'))!;
+    const api = out.find((i) => i.cwd.includes('api'))!;
+    expect(site.startMs).toBe(cutoff);
+    expect(site.activeMs).toBe(30 * MIN);
+    expect(site.activeMs).toBe(site.endMs - site.startMs); // invariant holds
+    expect(api.activeMs).toBe(60 * MIN); // other folder unaffected
+  });
+
+  it('drops intervals entirely before their folder cutoff', () => {
+    const mappings: FolderMapping[] = [{ clientId: 'c', path: 'C:/work/site', billFromMs: MON + 120 * MIN }];
+    const out = applyFolderCutoffs([interval('C:/work/site/x', 0, 60)], mappings);
+    expect(out).toHaveLength(0);
   });
 });
 

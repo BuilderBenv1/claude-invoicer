@@ -9,6 +9,7 @@ import {
   weekStartKey,
   weekRange,
   activeWithin,
+  applyFolderCutoffs,
   matchMapping,
   basename,
   type ActivityInterval as CoreInterval,
@@ -40,6 +41,7 @@ function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
     path: m.path,
     label: m.label ?? undefined,
     ratePerHour: m.hourlyRate ?? undefined,
+    billFromMs: m.billFromMs || undefined,
   };
 }
 
@@ -97,14 +99,9 @@ export interface BillableWeek {
 }
 
 /**
- * The client's "bill from" cutoff (epoch ms): activity before it is never billed.
- * Stored in the (otherwise unused) billed_through_ms column. 0 = no cutoff.
+ * Build the per-week billable breakdown for one client (newest first).
+ * `ci` must already have per-folder cutoffs applied (via applyFolderCutoffs).
  */
-export function billFromMs(client: Client): number {
-  return client.billedThroughMs ?? 0;
-}
-
-/** Build the per-week billable breakdown for one client (newest first). */
 function clientWeeks(
   ci: CoreInterval[],
   client: Client,
@@ -114,19 +111,15 @@ function clientWeeks(
 ): BillableWeek[] {
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
   const currentKey = weekStartKey(Date.now(), s.timezone);
-  const cutoff = billFromMs(client);
   const agg = aggregateIntervals(ci, { billedThroughMs: 0, timeZone: s.timezone });
 
-  return Object.keys(agg.byWeek)
-    .map((weekKey) => {
+  return Object.entries(agg.byWeek)
+    .map(([weekKey, activeMs]) => {
       const { startMs, endMs } = weekRange(weekKey, s.timezone);
-      const lower = Math.max(startMs, cutoff); // exclude pre-cutoff time
-      let activeMs = 0;
-      for (const it of ci) activeMs += activeWithin(it, lower, endMs);
       const lines = buildInvoiceLines(ci, {
         ratePerHour: client.hourlyRate,
         roundIncrementMin,
-        billedThroughMs: lower,
+        billedThroughMs: startMs,
         cutoffMs: endMs,
         groupBy: 'project',
         mappings: coreMappings,
@@ -168,7 +161,7 @@ export async function getOverview(): Promise<OverviewData> {
   const currentKey = weekStartKey(Date.now(), s.timezone);
 
   const stats: ClientStat[] = clientRows.map((client) => {
-    const ci = intervalsForClient(intervals, client.id, coreMappings);
+    const ci = applyFolderCutoffs(intervalsForClient(intervals, client.id, coreMappings), coreMappings);
     const billed = billedWeekStarts(invoiceRows, client.id);
     const weeks = clientWeeks(ci, client, coreMappings, billed, s);
     const current = weeks.find((w) => w.isCurrent);
@@ -211,7 +204,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
   const client = found[0];
   if (!client) return null;
 
-  const ci = intervalsForClient(intervals, clientId, coreMappings);
+  const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
   const billed = billedWeekStarts(invoiceRows, clientId);
   const weeks = clientWeeks(ci, client, coreMappings, billed, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
@@ -268,14 +261,14 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   if (!client) return null;
 
   const { startMs, endMs } = weekRange(weekKey, s.timezone);
-  const lower = Math.max(startMs, billFromMs(client)); // exclude pre-cutoff time
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
-  const ci = intervalsForClient(intervals, clientId, coreMappings);
+  // Per-folder cutoffs are applied up front, so the week window is just [start, end).
+  const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
 
   const lines = buildInvoiceLines(ci, {
     ratePerHour: client.hourlyRate,
     roundIncrementMin,
-    billedThroughMs: lower,
+    billedThroughMs: startMs,
     cutoffMs: endMs,
     groupBy: 'project',
     mappings: coreMappings,
@@ -285,14 +278,14 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   // Build the session list within this week, grouped by folder.
   const groupMap = new Map<string, WeekFolderGroup>();
   for (const it of ci) {
-    const ms = activeWithin(it, lower, endMs);
+    const ms = activeWithin(it, startMs, endMs);
     if (ms <= 0) continue;
     const m = matchMapping(it.cwd, coreMappings);
     const label = m ? m.label ?? basename(m.path) : basename(it.cwd);
     const session: WeekSession = {
       cwd: it.cwd,
       folderLabel: label,
-      startMs: Math.max(it.startMs, lower),
+      startMs: Math.max(it.startMs, startMs),
       endMs: Math.min(it.endMs, endMs),
       activeMs: ms,
     };

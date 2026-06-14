@@ -38,6 +38,8 @@ export const folderMappings = pgTable(
     label: text('label'),
     /** Per-folder hourly rate override; null = use the client's default rate. */
     hourlyRate: doublePrecision('hourly_rate'),
+    /** Per-folder "bill from" cutoff (epoch ms); 0 = no cutoff. */
+    billFromMs: bigint('bill_from_ms', { mode: 'number' }).notNull().default(0),
   },
   (t) => ({
     pathUnique: uniqueIndex('folder_path_unique').on(t.path),

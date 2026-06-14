@@ -211,6 +211,30 @@ export function invoiceSubtotal(lines: InvoiceLine[]): number {
   return round2(lines.reduce((s, l) => s + l.amount, 0));
 }
 
+/**
+ * Clip each interval to its folder's "bill from" cutoff: drop the portion before
+ * the cutoff of the mapping that owns the interval's cwd. Intervals fully before
+ * their cutoff are removed; unmapped or uncut intervals pass through unchanged.
+ * Preserves the engine invariant activeMs === endMs - startMs.
+ */
+export function applyFolderCutoffs(
+  intervals: ActivityInterval[],
+  mappings: FolderMapping[],
+): ActivityInterval[] {
+  const out: ActivityInterval[] = [];
+  for (const it of intervals) {
+    const m = matchMapping(it.cwd, mappings);
+    const cutoff = m?.billFromMs ?? 0;
+    if (cutoff <= it.startMs) {
+      out.push(it);
+    } else if (cutoff < it.endMs) {
+      out.push({ ...it, startMs: cutoff, activeMs: it.endMs - cutoff });
+    }
+    // else: interval is entirely before the cutoff -> excluded
+  }
+  return out;
+}
+
 /** Intervals that belong to a given client under the supplied mappings. */
 export function intervalsForClient(
   intervals: ActivityInterval[],

@@ -20,6 +20,7 @@ export {
   aggregateIntervals,
   buildInvoiceLines,
   invoiceSubtotal,
+  applyFolderCutoffs,
   intervalsForClient,
   unassignedFolders,
   type ClientAggregate,

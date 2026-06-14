@@ -31,4 +31,6 @@ export interface FolderMapping {
   label?: string;
   /** Optional per-folder hourly rate; falls back to the client default. */
   ratePerHour?: number;
+  /** Optional "bill from" cutoff (epoch ms): this folder's time before it is excluded. */
+  billFromMs?: number;
 }

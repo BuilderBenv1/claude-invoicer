@@ -9,6 +9,7 @@ import {
   invoiceSubtotal,
   normalizePath,
   weekRange,
+  applyFolderCutoffs,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
 } from '@claude-invoicer/core';
@@ -89,22 +90,24 @@ export async function archiveClient(fd: FormData): Promise<void> {
 }
 
 /**
- * Set (or clear) a client's "bill from" cutoff — time before it is excluded from
- * all estimates and invoices. mode: 'now' uses the current instant, 'set' uses
- * the supplied epoch ms (computed in the user's browser), 'clear' removes it.
+ * Set (or clear) a single folder's "bill from" cutoff — that folder's time before
+ * it is excluded from estimates and invoices, leaving the client's other folders
+ * untouched. mode: 'now' uses the current instant, 'set' uses the supplied epoch
+ * ms (computed in the user's browser), 'clear' removes it.
  */
-export async function setBillFrom(fd: FormData): Promise<void> {
+export async function setFolderBillFrom(fd: FormData): Promise<void> {
+  const mappingId = str(fd, 'mappingId');
   const clientId = str(fd, 'clientId');
-  if (!clientId) throw new Error('Missing client id');
+  if (!mappingId) throw new Error('Missing folder id');
   const mode = str(fd, 'mode');
   let ms = 0;
   if (mode === 'now') ms = Date.now();
   else if (mode === 'set') ms = Math.max(0, Number(str(fd, 'ms')) || 0);
   // mode === 'clear' -> 0
   const db = getDb();
-  await db.update(clients).set({ billedThroughMs: ms }).where(eq(clients.id, clientId));
+  await db.update(folderMappings).set({ billFromMs: ms }).where(eq(folderMappings.id, mappingId));
   revalidatePath('/');
-  revalidatePath('/clients/' + clientId);
+  if (clientId) revalidatePath('/clients/' + clientId);
 }
 
 // ---------------- Folder mappings ----------------
@@ -248,6 +251,7 @@ export async function issueInvoice(fd: FormData): Promise<void> {
       path: m.path,
       label: m.label ?? undefined,
       ratePerHour: m.hourlyRate ?? undefined,
+      billFromMs: m.billFromMs || undefined,
     }));
     const rawIntervals = await tx.select().from(activityIntervals);
     const intervals: CoreInterval[] = rawIntervals.map((r) => ({
@@ -258,14 +262,13 @@ export async function issueInvoice(fd: FormData): Promise<void> {
       activeMs: r.activeMs,
     }));
 
-    const ci = intervalsForClient(intervals, clientId, coreMappings);
+    // Apply per-folder "bill from" cutoffs before windowing to the week.
+    const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
     const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
-    // Respect the client's "bill from" cutoff (stored in billed_through_ms).
-    const lower = Math.max(startMs, client.billedThroughMs ?? 0);
     const timeLines = buildInvoiceLines(ci, {
       ratePerHour: client.hourlyRate,
       roundIncrementMin,
-      billedThroughMs: lower, // lower bound: max(week start, bill-from cutoff)
+      billedThroughMs: startMs, // lower bound: start of the week
       cutoffMs: endMs, // upper bound: end of the week
       groupBy: 'project',
       mappings: coreMappings,

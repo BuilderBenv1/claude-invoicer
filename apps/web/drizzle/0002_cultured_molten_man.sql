@@ -1,0 +1,1 @@
+ALTER TABLE "folder_mappings" ADD COLUMN "bill_from_ms" bigint DEFAULT 0 NOT NULL;
