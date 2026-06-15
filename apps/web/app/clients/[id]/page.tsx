@@ -105,7 +105,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           Each folder (and its subfolders) can have its own hourly rate (blank = client default
           {' '}{formatMoney(client.hourlyRate, client.currency)}/hr) and its own “bill from” cutoff to
           exclude earlier time (e.g. a non-billable call, manual review, or an agent run) — without
-          touching the client’s other folders.
+          touching the client’s other folders. Pick a date (time optional — blank means start of that
+          day), or use “Now”.
         </p>
         <div className="space-y-2">
           {mappings.map((m) => (
