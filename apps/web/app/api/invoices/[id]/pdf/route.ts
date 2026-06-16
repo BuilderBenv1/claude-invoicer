@@ -12,11 +12,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const detail = await getInvoiceDetail(id);
   if (!detail) return new Response('not found', { status: 404 });
 
-  const buf = await renderInvoicePdf(detail);
-  return new Response(new Uint8Array(buf), {
-    headers: {
-      'content-type': 'application/pdf',
-      'content-disposition': `inline; filename="${detail.invoice.number}.pdf"`,
-    },
-  });
+  try {
+    const buf = await renderInvoicePdf(detail);
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': `inline; filename="${detail.invoice.number}.pdf"`,
+      },
+    });
+  } catch (e) {
+    const err = e as Error;
+    console.error('PDF render failed', err);
+    // Temporary: surface the real error so we can diagnose the serverless 500.
+    return new Response(`PDF render error:\n${err?.message}\n\n${err?.stack}`, {
+      status: 500,
+      headers: { 'content-type': 'text/plain' },
+    });
+  }
 }
