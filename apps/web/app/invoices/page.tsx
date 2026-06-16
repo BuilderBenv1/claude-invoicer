@@ -10,11 +10,16 @@ export default async function InvoicesPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Invoices</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Invoices</h1>
+        <Link href="/invoices/new" className="btn-primary">
+          + New invoice
+        </Link>
+      </div>
 
       {invoices.length === 0 ? (
         <div className="card text-sm text-slate-400">
-          No invoices yet. Issue one from a client on the Overview page.
+          No invoices yet. Issue one per week from a client, or create one by hand with “New invoice”.
         </div>
       ) : (
         <div className="card overflow-x-auto">

@@ -344,6 +344,112 @@ export async function issueInvoice(fd: FormData): Promise<void> {
   redirect('/invoices/' + newInvoiceId);
 }
 
+interface ManualLineInput {
+  label: string;
+  hours: number;
+  ratePerHour: number;
+  amount: number;
+}
+
+/**
+ * Create an invoice by hand (for older / off-Claude work). Accepts arbitrary line
+ * items, an optional issue date and number override, and an optional "already
+ * paid" flag that issues the receipt immediately. Not tied to a tracked week, so
+ * its week-window fields are set to -1 (never collides with a real week start).
+ */
+export async function createManualInvoice(fd: FormData): Promise<void> {
+  const clientId = str(fd, 'clientId');
+  if (!clientId) throw new Error('Pick a client');
+
+  let lines: ManualLineInput[] = [];
+  try {
+    const parsed = JSON.parse(str(fd, 'lines') || '[]') as unknown;
+    lines = (Array.isArray(parsed) ? parsed : [])
+      .map((l) => {
+        const row = l as Record<string, unknown>;
+        return {
+          label: String(row.label ?? '').trim(),
+          hours: Number(row.hours) || 0,
+          ratePerHour: Number(row.ratePerHour) || 0,
+          amount: Math.round((Number(row.amount) || 0) * 100) / 100,
+        };
+      })
+      .filter((l) => l.label && l.amount !== 0);
+  } catch {
+    throw new Error('Could not read the line items');
+  }
+  if (lines.length === 0) throw new Error('Add at least one line item with a description and amount');
+
+  const customNumber = str(fd, 'number');
+  const issuedAtStr = str(fd, 'issuedAt');
+  const markPaid = str(fd, 'markPaid') === '1';
+  const paidAtStr = str(fd, 'paidAt');
+  const db = getDb();
+
+  const newInvoiceId = await db.transaction(async (tx) => {
+    const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
+    if (!s) throw new Error('Settings not initialized');
+    const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
+    if (!client) throw new Error('Client not found');
+
+    const subtotal = Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+    const id = newId();
+
+    // Use a custom number as-is, otherwise take the next auto sequence.
+    let number = customNumber;
+    let seq = s.invoiceSeq;
+    if (!number) {
+      seq = s.invoiceSeq + 1;
+      number = `INV-${String(seq).padStart(4, '0')}`;
+    }
+    // Noon UTC so the date doesn't shift a day when displayed in other zones.
+    const issuedAt = issuedAtStr ? new Date(`${issuedAtStr}T12:00:00Z`) : new Date();
+
+    await tx.insert(invoices).values({
+      id,
+      number,
+      clientId,
+      status: 'unpaid',
+      currency: client.currency,
+      subtotal,
+      prevBilledThroughMs: -1, // not a tracked week
+      cutoffMs: -1,
+      notes: 'Manual invoice',
+      businessName: s.businessName,
+      businessEmail: s.businessEmail,
+      businessAddress: s.businessAddress,
+      taxId: s.taxId,
+      clientName: client.name,
+      clientEmail: client.email,
+      clientAddress: client.address,
+      issuedAt,
+    });
+    await tx.insert(invoiceLines).values(
+      lines.map((l) => ({
+        invoiceId: id,
+        label: l.label,
+        hours: l.hours,
+        ratePerHour: l.ratePerHour,
+        amount: l.amount,
+      })),
+    );
+    if (!customNumber) await tx.update(settings).set({ invoiceSeq: seq }).where(eq(settings.id, 1));
+
+    if (markPaid) {
+      const rseq = (s.receiptSeq ?? 0) + 1;
+      const paidAt = paidAtStr ? new Date(`${paidAtStr}T12:00:00Z`) : new Date();
+      await tx.update(invoices).set({ status: 'paid', paidAt }).where(eq(invoices.id, id));
+      await tx.insert(receipts).values({ id: newId(), invoiceId: id, number: `RCPT-${String(rseq).padStart(4, '0')}` });
+      await tx.update(settings).set({ receiptSeq: rseq }).where(eq(settings.id, 1));
+    }
+    return id;
+  });
+
+  revalidatePath('/');
+  revalidatePath('/invoices');
+  redirect('/invoices/' + newInvoiceId);
+}
+
 export async function markInvoicePaid(fd: FormData): Promise<void> {
   const invoiceId = str(fd, 'invoiceId');
   if (!invoiceId) throw new Error('Missing invoice id');
