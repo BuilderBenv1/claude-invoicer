@@ -94,10 +94,10 @@ function partyBlock(page: PDFPage, f: Fonts, label: string, name: string, extra:
 }
 
 // Column right edges for the line-items table.
-const COL_HOURS = RIGHT - 200;
-const COL_RATE = RIGHT - 110;
+const COL_HOURS = RIGHT - 165;
+const COL_RATE = RIGHT - 85;
 const COL_AMT = RIGHT;
-const DESC_MAX = COL_HOURS - M - 70;
+const DESC_MAX = COL_HOURS - (M + 8) - 40;
 
 export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Array> {
   const { invoice, lines, settings } = detail;
@@ -111,30 +111,23 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
 
   let y = header(page, f, invoice, 'INVOICE', [invoice.number, invoice.notes ?? ''].filter(Boolean));
 
-  // Bill-to (left) + meta (right)
+  // Bill-to (left) + meta (right). The table starts below whichever block is lower
+  // so the status never collides with the table.
   const leftBottom = partyBlock(page, f, 'Bill to', invoice.clientName, [invoice.clientEmail, invoice.clientAddress], y);
   draw(page, 'ISSUED', M, y, f.reg, 8, MUTED, RIGHT);
   draw(page, day(invoice.issuedAt, tz), M, y - 14, f.reg, 10, INK, RIGHT);
-  draw(page, 'STATUS', M, y - 30, f.reg, 8, MUTED, RIGHT);
-  draw(
-    page,
-    invoice.status.toUpperCase(),
-    M,
-    y - 44,
-    f.bold,
-    11,
-    invoice.status === 'paid' ? GREEN : MUTED,
-    RIGHT,
-  );
+  draw(page, 'STATUS', M, y - 32, f.reg, 8, MUTED, RIGHT);
+  draw(page, invoice.status.toUpperCase(), M, y - 46, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
+  const metaBottom = y - 46;
 
   // Table
-  y = leftBottom - 24;
-  page.drawRectangle({ x: M, y: y - 6, width: RIGHT - M, height: 22, color: rgb(0.945, 0.96, 0.98) });
+  y = Math.min(leftBottom, metaBottom) - 34;
+  page.drawRectangle({ x: M, y: y - 7, width: RIGHT - M, height: 24, color: rgb(0.945, 0.96, 0.98) });
   draw(page, 'Description', M + 8, y, f.bold, 9);
   draw(page, 'Hours', M, y, f.bold, 9, INK, COL_HOURS);
   draw(page, 'Rate', M, y, f.bold, 9, INK, COL_RATE);
   draw(page, 'Amount', M, y, f.bold, 9, INK, COL_AMT);
-  y -= 24;
+  y -= 26;
 
   for (const l of lines as InvoiceLine[]) {
     const flat = l.hours === 0 && l.ratePerHour === 0;
@@ -142,12 +135,12 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
     draw(page, flat ? '—' : l.hours.toFixed(2), M, y, f.reg, 10, INK, COL_HOURS);
     draw(page, flat ? '—' : money(l.ratePerHour, invoice.currency), M, y, f.reg, 10, INK, COL_RATE);
     draw(page, money(l.amount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
-    page.drawLine({ start: { x: M, y: y - 8 }, end: { x: RIGHT, y: y - 8 }, thickness: 0.5, color: LINE });
-    y -= 22;
+    page.drawLine({ start: { x: M, y: y - 9 }, end: { x: RIGHT, y: y - 9 }, thickness: 0.5, color: LINE });
+    y -= 24;
   }
 
   // Total
-  y -= 6;
+  y -= 10;
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
   draw(page, money(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
 

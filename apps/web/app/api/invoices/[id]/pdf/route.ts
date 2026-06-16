@@ -21,12 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     });
   } catch (e) {
-    const err = e as Error;
-    console.error('PDF render failed', err);
-    // Temporary: surface the real error so we can diagnose the serverless 500.
-    return new Response(`PDF render error:\n${err?.message}\n\n${err?.stack}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain' },
-    });
+    console.error('PDF render failed', e);
+    return new Response('Could not generate the invoice PDF.', { status: 500 });
   }
 }
