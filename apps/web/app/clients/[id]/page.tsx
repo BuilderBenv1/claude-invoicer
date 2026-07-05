@@ -128,15 +128,14 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                       <td className="py-2 text-right">
                         {w.billed ? (
                           <span className="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-300">invoiced</span>
+                        ) : isCurrent ? (
+                          <span className="text-xs text-slate-500">in progress</span>
                         ) : (
                           <form action={issueInvoice} className="inline">
                             <input type="hidden" name="clientId" value={client.id} />
                             <input type="hidden" name="weekStart" value={w.weekKey} />
-                            {/* One-offs ride along only with the current week's invoice. */}
-                            <input type="hidden" name="includeOneOffs" value={isCurrent ? '1' : '0'} />
-                            <button className="btn-primary" type="submit">
-                              Invoice{isCurrent && oneOffTotal > 0 ? ' + charges' : ''}
-                            </button>
+                            <input type="hidden" name="includeOneOffs" value="0" />
+                            <button className="btn-primary" type="submit">Invoice</button>
                           </form>
                         )}
                       </td>

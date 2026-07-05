@@ -211,11 +211,13 @@ export async function issueInvoice(fd: FormData): Promise<void> {
 
   const res = await issueWeekInvoice(clientId, weekStart, { includeOneOffs });
   if (!res.ok) {
-    throw new Error(
+    const msg =
       res.reason === 'already-invoiced'
         ? `Week of ${weekStart} is already invoiced${res.number ? ` (${res.number})` : ''}.`
-        : `Nothing to invoice for the week of ${weekStart}.`,
-    );
+        : res.reason === 'week-not-finished'
+          ? `The week of ${weekStart} isn't finished yet — you can invoice it once it ends.`
+          : `Nothing to invoice for the week of ${weekStart}.`;
+    throw new Error(msg);
   }
   try {
     await emailInvoiceById(res.id);

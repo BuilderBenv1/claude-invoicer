@@ -96,7 +96,7 @@ export async function insertInvoice(
 
 export type IssueResult =
   | { ok: true; id: string; number: string }
-  | { ok: false; reason: 'already-invoiced' | 'nothing'; number?: string };
+  | { ok: false; reason: 'already-invoiced' | 'nothing' | 'week-not-finished'; number?: string };
 
 /** Issue one client's week invoice (respecting the saved adjustment + one-offs). */
 export async function issueWeekInvoice(
@@ -113,6 +113,8 @@ export async function issueWeekInvoice(
     if (!client) throw new Error('Client not found');
 
     const { startMs, endMs } = weekRange(weekStart, s.timezone);
+
+    if (endMs > Date.now()) return { ok: false, reason: 'week-not-finished' };
 
     const existing = await tx
       .select()
