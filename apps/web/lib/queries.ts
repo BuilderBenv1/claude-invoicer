@@ -14,8 +14,10 @@ import {
   applyFolderCutoffs,
   matchMapping,
   basename,
+  weekProjectDayGrid,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
+  type WeekProjectDayGrid,
 } from '@claude-invoicer/core';
 import { getDb } from './db';
 import {
@@ -47,6 +49,23 @@ function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
     ratePerHour: m.hourlyRate ?? undefined,
     billFromMs: m.billFromMs || undefined,
   };
+}
+
+/** Recompute a per-project/per-day hours grid for a WEEK invoice; null for manual/one-off (window = -1). */
+async function invoiceDayGrid(inv: Invoice, s: Settings): Promise<WeekProjectDayGrid | null> {
+  if (inv.prevBilledThroughMs < 0) return null;
+  const db = getDb();
+  const [rawIntervals, rawMappings] = await Promise.all([
+    db.select().from(activityIntervals),
+    db.select().from(folderMappings),
+  ]);
+  const coreMappings = rawMappings.map(toCoreMapping);
+  const ci = applyFolderCutoffs(
+    intervalsForClient(rawIntervals.map(toCoreInterval), inv.clientId, coreMappings),
+    coreMappings,
+  );
+  const weekKey = weekStartKey(inv.prevBilledThroughMs, s.timezone);
+  return weekProjectDayGrid(ci, weekKey, s.timezone, coreMappings);
 }
 
 async function loadAll() {
@@ -271,6 +290,7 @@ export interface WeekDetail {
   invoiceId: string | null;
   invoiceNumber: string | null;
   roundIncrementMin: number;
+  dayGrid: WeekProjectDayGrid;
 }
 
 /** Full drill-down of one client's week: invoice lines + the sessions behind them. */
@@ -329,6 +349,8 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   const adjLine = adjustmentLine(adjRow?.adjustHours ?? 0, client.hourlyRate);
   const linesWithAdj = adjLine ? [...lines, adjLine] : lines;
 
+  const dayGrid = weekProjectDayGrid(ci, weekKey, s.timezone, coreMappings);
+
   return {
     client,
     settings: s,
@@ -343,6 +365,7 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
     invoiceId: invoice?.id ?? null,
     invoiceNumber: invoice?.number ?? null,
     roundIncrementMin,
+    dayGrid,
   };
 }
 
@@ -366,6 +389,7 @@ export interface InvoiceDetail {
   lines: InvoiceLine[];
   receiptNumber: string | null;
   settings: Settings;
+  dayGrid: WeekProjectDayGrid | null;
 }
 
 export async function getInvoiceDetail(invoiceId: string): Promise<InvoiceDetail | null> {
@@ -377,7 +401,8 @@ export async function getInvoiceDetail(invoiceId: string): Promise<InvoiceDetail
     db.select().from(receipts).where(eq(receipts.invoiceId, invoiceId)),
     getSettings(),
   ]);
-  return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s };
+  const dayGrid = await invoiceDayGrid(inv, s);
+  return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s, dayGrid };
 }
 
 export async function getInvoiceByToken(token: string): Promise<InvoiceDetail | null> {
@@ -389,7 +414,8 @@ export async function getInvoiceByToken(token: string): Promise<InvoiceDetail | 
     db.select().from(receipts).where(eq(receipts.invoiceId, inv.id)),
     getSettings(),
   ]);
-  return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s };
+  const dayGrid = await invoiceDayGrid(inv, s);
+  return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s, dayGrid };
 }
 
 export { normalizePath };
