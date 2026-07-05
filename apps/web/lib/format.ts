@@ -70,3 +70,9 @@ export function formatTimeRange(startMs: number, endMs: number, timeZone = 'UTC'
 export function newId(): string {
   return crypto.randomUUID();
 }
+
+/** Unguessable URL-safe token for public invoice links (144 bits of entropy). */
+export function newToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}

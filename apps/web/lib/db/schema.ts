@@ -98,6 +98,9 @@ export const invoices = pgTable('invoices', {
   businessEmail: text('business_email'),
   businessAddress: text('business_address'),
   taxId: text('tax_id'),
+  publicToken: text('public_token'),
+  emailedAt: timestamp('emailed_at', { withTimezone: true }),
+  emailedTo: text('emailed_to'),
   clientName: text('client_name').notNull(),
   clientEmail: text('client_email'),
   clientAddress: text('client_address'),
@@ -143,7 +146,21 @@ export const settings = pgTable('settings', {
   timezone: text('timezone').notNull().default('UTC'),
   invoiceSeq: integer('invoice_seq').notNull().default(0),
   receiptSeq: integer('receipt_seq').notNull().default(0),
+  autoSendWeekly: integer('auto_send_weekly').notNull().default(0),
 });
+
+/** Signed per-week billable-hours adjustment (applied at issue time). */
+export const weekAdjustments = pgTable(
+  'week_adjustments',
+  {
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    weekStartMs: bigint('week_start_ms', { mode: 'number' }).notNull(),
+    adjustHours: doublePrecision('adjust_hours').notNull().default(0),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.clientId, t.weekStartMs] }) }),
+);
 
 export type Client = typeof clients.$inferSelect;
 export type FolderMapping = typeof folderMappings.$inferSelect;
@@ -152,3 +169,4 @@ export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
 export type OneOffCharge = typeof oneOffCharges.$inferSelect;
+export type WeekAdjustment = typeof weekAdjustments.$inferSelect;
