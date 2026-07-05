@@ -147,6 +147,11 @@ CREATE TABLE IF NOT EXISTS week_adjustments (
   adjust_hours double precision NOT NULL DEFAULT 0,
   PRIMARY KEY (client_id, week_start_ms)
 );
+
+-- Concurrency guard (chosen during review): a given client+week can be invoiced
+-- once. Partial so manual / one-off invoices (window = -1) can still repeat.
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_client_week_unique
+  ON invoices(client_id, prev_billed_through_ms) WHERE prev_billed_through_ms >= 0;
 ```
 
 - [ ] **Step 2: Update Drizzle schema — invoices columns**
