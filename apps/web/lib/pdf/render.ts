@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
+import type { WeekProjectDayGrid } from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -93,6 +94,40 @@ function partyBlock(page: PDFPage, f: Fonts, label: string, name: string, extra:
   return yy;
 }
 
+// 9-column hours grid: Project label + 7 day columns + Total, right-aligned numerics.
+function drawDayGrid(page: PDFPage, f: Fonts, grid: WeekProjectDayGrid, startY: number): number {
+  let y = startY;
+  draw(page, 'HOURS BY DAY', M, y, f.bold, 9, INK);
+  y -= 16;
+  const LABELX = 175;
+  const colW = (RIGHT - LABELX) / 8;
+  const colRight = (c: number) => LABELX + (c + 1) * colW;
+  const num = (n: number) => (n === 0 ? '' : n.toFixed(2));
+
+  // header: weekday on top, date under it, right-aligned per column
+  draw(page, 'Project', M + 2, y, f.bold, 8, MUTED);
+  grid.columns.forEach((c, i) => draw(page, c.weekday, M, y, f.bold, 8, MUTED, colRight(i)));
+  draw(page, 'Total', M, y, f.bold, 8, MUTED, colRight(7));
+  y -= 9;
+  grid.columns.forEach((c, i) => draw(page, c.dayKey.slice(5), M, y, f.reg, 6.5, MUTED, colRight(i)));
+  y -= 6;
+  hr(page, y);
+  y -= 12;
+
+  for (const r of grid.rows) {
+    draw(page, fit(r.label, f.reg, 8, LABELX - (M + 2) - 4), M + 2, y, f.reg, 8, INK);
+    r.hoursByDay.forEach((h, i) => draw(page, num(h), M, y, f.reg, 8, INK, colRight(i)));
+    draw(page, r.total.toFixed(2), M, y, f.bold, 8, INK, colRight(7));
+    y -= 12;
+  }
+
+  hr(page, y + 3);
+  draw(page, 'Total', M + 2, y - 9, f.bold, 8, INK);
+  grid.dayTotals.forEach((h, i) => draw(page, num(h), M, y - 9, f.bold, 8, INK, colRight(i)));
+  draw(page, grid.grandTotal.toFixed(2), M, y - 9, f.bold, 8, INK, colRight(7));
+  return y - 22;
+}
+
 // Column right edges for the line-items table.
 const COL_HOURS = RIGHT - 165;
 const COL_RATE = RIGHT - 85;
@@ -143,6 +178,12 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   y -= 10;
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
   draw(page, money(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+
+  // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
+  if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
+    y -= 30;
+    y = drawDayGrid(page, f, detail.dayGrid, y);
+  }
 
   draw(
     page,
