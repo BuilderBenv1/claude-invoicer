@@ -189,7 +189,7 @@ export async function getOverview(): Promise<OverviewData> {
       thisWeekMs: current?.activeMs ?? 0,
       thisWeekAmount: current?.amount ?? 0,
       thisWeekBilled: current?.billed ?? false,
-      unbilledWeeks: weeks.filter((w) => !w.billed && w.amount > 0).length,
+      unbilledWeeks: weeks.filter((w) => !w.billed && (w.activeMs > 0 || w.adjustHours !== 0)).length,
       oneOffTotal: sumAmounts(unbilledOneOffs(oneOffs, client.id)),
       roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
     };
