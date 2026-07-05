@@ -46,8 +46,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Bill by week (Mon–Sun)</h2>
         {oneOffTotal > 0 && (
           <p className="text-xs text-slate-500">
-            {formatMoney(oneOffTotal, client.currency)} of one-off charges will be added when you invoice
-            the current week.
+            {formatMoney(oneOffTotal, client.currency)} of unbilled one-off charges — bill them with
+            “Bill one-offs now” below, or they ride along when the weekly auto-send issues a week.
           </p>
         )}
         <div className="card overflow-x-auto">
