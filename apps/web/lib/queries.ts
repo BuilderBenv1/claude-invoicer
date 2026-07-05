@@ -353,4 +353,16 @@ export async function getInvoiceDetail(invoiceId: string): Promise<InvoiceDetail
   return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s };
 }
 
+export async function getInvoiceByToken(token: string): Promise<InvoiceDetail | null> {
+  const db = getDb();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.publicToken, token));
+  if (!inv) return null;
+  const [lines, rcpt, s] = await Promise.all([
+    db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id)),
+    db.select().from(receipts).where(eq(receipts.invoiceId, inv.id)),
+    getSettings(),
+  ]);
+  return { invoice: inv, lines, receiptNumber: rcpt[0]?.number ?? null, settings: s };
+}
+
 export { normalizePath };
