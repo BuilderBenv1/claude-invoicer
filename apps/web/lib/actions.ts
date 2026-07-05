@@ -8,7 +8,7 @@ import { getDb } from './db';
 import { clients, folderMappings, invoices, oneOffCharges, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
-import { insertInvoice, issueWeekInvoice, markPaidTx, emailInvoiceById, emailReceiptById } from './invoice-service';
+import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? '').trim();
@@ -307,8 +307,7 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
 export async function markInvoicePaid(fd: FormData): Promise<void> {
   const invoiceId = str(fd, 'invoiceId');
   if (!invoiceId) throw new Error('Missing invoice id');
-  const db = getDb();
-  const receiptNumber = await db.transaction((tx) => markPaidTx(tx, invoiceId));
+  const receiptNumber = await markPaidAndReceipt(invoiceId);
   if (receiptNumber) {
     try {
       await emailReceiptById(invoiceId);
@@ -471,7 +470,7 @@ export async function markPaidPublic(fd: FormData): Promise<void> {
   const [inv] = await db.select().from(invoices).where(eq(invoices.publicToken, token));
   if (!inv) throw new Error('Invoice not found');
 
-  const receiptNumber = await db.transaction((tx) => markPaidTx(tx, inv.id));
+  const receiptNumber = await markPaidAndReceipt(inv.id);
   if (receiptNumber) {
     try {
       await emailReceiptById(inv.id);

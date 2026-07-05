@@ -136,7 +136,7 @@ export const receipts = pgTable('receipts', {
     .references(() => invoices.id, { onDelete: 'cascade' }),
   number: text('number').notNull(),
   issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => ({ invoiceUnique: uniqueIndex('receipts_invoice_unique').on(t.invoiceId) }));
 
 /** Singleton settings row (id = 1). */
 export const settings = pgTable('settings', {

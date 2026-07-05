@@ -210,6 +210,20 @@ export async function markPaidTx(tx: Tx, invoiceId: string, paidAt: Date = new D
   return number;
 }
 
+/** Mark paid + issue receipt in its own transaction, tolerant of a concurrent
+ *  duplicate (a unique-violation on receipts → returns null, no second receipt). */
+export async function markPaidAndReceipt(invoiceId: string, paidAt?: Date): Promise<string | null> {
+  const db = getDb();
+  try {
+    return await db.transaction((tx) => markPaidTx(tx, invoiceId, paidAt));
+  } catch (e) {
+    const code = (e as { code?: string; cause?: { code?: string } })?.code
+      ?? (e as { cause?: { code?: string } })?.cause?.code;
+    if (code === '23505') return null;
+    throw e;
+  }
+}
+
 /** Lazily assign a public token to an invoice that predates the feature. */
 export async function ensurePublicToken(inv: Invoice): Promise<string> {
   if (inv.publicToken) return inv.publicToken;

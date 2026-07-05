@@ -5,9 +5,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const header = req.headers.get('authorization');
-    if (header !== `Bearer ${secret}`) return new Response('unauthorized', { status: 401 });
+  const header = req.headers.get('authorization');
+  if (!secret || header !== `Bearer ${secret}`) {
+    return new Response('unauthorized', { status: 401 });
   }
   try {
     const summary = await runWeeklyAutoSend();
