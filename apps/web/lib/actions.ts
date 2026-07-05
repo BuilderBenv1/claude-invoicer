@@ -3,9 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
-import { normalizePath, round2 } from '@claude-invoicer/core';
+import { normalizePath, round2, weekRange } from '@claude-invoicer/core';
 import { getDb } from './db';
-import { clients, folderMappings, invoices, oneOffCharges, settings } from './db/schema';
+import { clients, folderMappings, invoices, oneOffCharges, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
 import { insertInvoice, issueWeekInvoice, markPaidTx, emailInvoiceById, emailReceiptById } from './invoice-service';
@@ -341,6 +341,45 @@ export async function deleteInvoice(fd: FormData): Promise<void> {
   revalidatePath('/');
   revalidatePath('/invoices');
   redirect('/invoices');
+}
+
+/**
+ * Set a week's billable-hours adjustment (a signed delta applied at issue time).
+ * `set` overrides the stored value; otherwise `delta` is added to it. Zero clears it.
+ */
+export async function adjustWeek(fd: FormData): Promise<void> {
+  const clientId = str(fd, 'clientId');
+  const weekStart = str(fd, 'weekStart');
+  if (!clientId || !weekStart) throw new Error('Missing client or week');
+  const s = await getSettings();
+  const { startMs } = weekRange(weekStart, s.timezone);
+  const db = getDb();
+
+  const [cur] = await db
+    .select()
+    .from(weekAdjustments)
+    .where(and(eq(weekAdjustments.clientId, clientId), eq(weekAdjustments.weekStartMs, startMs)));
+  const current = cur?.adjustHours ?? 0;
+
+  const setRaw = String(fd.get('set') ?? '').trim();
+  let next = setRaw !== '' ? Number(setRaw) || 0 : current + (Number(fd.get('delta')) || 0);
+  next = round2(next);
+
+  if (next === 0) {
+    await db
+      .delete(weekAdjustments)
+      .where(and(eq(weekAdjustments.clientId, clientId), eq(weekAdjustments.weekStartMs, startMs)));
+  } else {
+    await db
+      .insert(weekAdjustments)
+      .values({ clientId, weekStartMs: startMs, adjustHours: next })
+      .onConflictDoUpdate({
+        target: [weekAdjustments.clientId, weekAdjustments.weekStartMs],
+        set: { adjustHours: next },
+      });
+  }
+  revalidatePath('/');
+  revalidatePath('/clients/' + clientId);
 }
 
 // ---------------- Settings ----------------

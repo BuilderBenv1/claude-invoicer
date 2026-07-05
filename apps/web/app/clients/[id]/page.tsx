@@ -10,6 +10,7 @@ import {
   addOneOff,
   removeOneOff,
   issueInvoice,
+  adjustWeek,
   archiveClient,
 } from '@/lib/actions';
 import { BillFromForm } from '@/components/bill-from-form';
@@ -22,7 +23,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   if (!detail) notFound();
 
   const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey } = detail;
-  const billableWeeks = weeks.filter((w) => w.amount > 0 || w.billed);
+  const billableWeeks = weeks.filter((w) => w.activeMs > 0 || w.billed || w.adjustHours !== 0);
+  const stepH = Math.round((roundIncrementMin / 60) * 100) / 100;
 
   return (
     <div className="space-y-10">
@@ -57,6 +59,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                   <th className="pb-2">Week of</th>
                   <th className="pb-2 text-right">Time</th>
                   <th className="pb-2 text-right">Amount</th>
+                  <th className="pb-2 text-right">Adjust (hrs)</th>
                   <th className="pb-2 text-right">Action</th>
                 </tr>
               </thead>
@@ -72,7 +75,55 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                         {isCurrent && <span className="ml-2 text-xs text-sky-400">this week</span>}
                       </td>
                       <td className="py-2 text-right">{formatDuration(w.activeMs)}</td>
-                      <td className="py-2 text-right">{formatMoney(w.amount, client.currency)}</td>
+                      <td className="py-2 text-right">
+                        {formatMoney(w.amount, client.currency)}
+                        {w.adjustHours !== 0 && (
+                          <div className="text-xs text-amber-300">
+                            adj {w.adjustHours > 0 ? '+' : ''}
+                            {w.adjustHours}h
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 text-right">
+                        {w.billed ? (
+                          <span className="text-slate-600">—</span>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            <form action={adjustWeek} className="inline">
+                              <input type="hidden" name="clientId" value={client.id} />
+                              <input type="hidden" name="weekStart" value={w.weekKey} />
+                              <input type="hidden" name="delta" value={-stepH} />
+                              <button className="btn-ghost px-2" type="submit" aria-label="Reduce hours">
+                                −
+                              </button>
+                            </form>
+                            <form action={adjustWeek} className="inline-flex items-center gap-1">
+                              <input type="hidden" name="clientId" value={client.id} />
+                              <input type="hidden" name="weekStart" value={w.weekKey} />
+                              <input
+                                name="set"
+                                type="number"
+                                step="0.25"
+                                defaultValue={w.adjustHours || ''}
+                                placeholder="0"
+                                className="input w-16 py-0.5 text-right"
+                                aria-label="Set adjustment hours"
+                              />
+                              <button className="btn-ghost px-2" type="submit">
+                                Set
+                              </button>
+                            </form>
+                            <form action={adjustWeek} className="inline">
+                              <input type="hidden" name="clientId" value={client.id} />
+                              <input type="hidden" name="weekStart" value={w.weekKey} />
+                              <input type="hidden" name="delta" value={stepH} />
+                              <button className="btn-ghost px-2" type="submit" aria-label="Add hours">
+                                +
+                              </button>
+                            </form>
+                          </div>
+                        )}
+                      </td>
                       <td className="py-2 text-right">
                         {w.billed ? (
                           <span className="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-300">invoiced</span>
@@ -96,6 +147,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           )}
         </div>
         <p className="text-xs text-slate-500">Time rounded up to {roundIncrementMin} min per project line.</p>
+        <p className="text-xs text-slate-500">
+          Adjust nudges the week's billable hours by a signed delta (step {stepH}h) — it rides on the
+          final tracked total and is applied whether you invoice by hand or the weekly cron does.
+        </p>
       </section>
 
       {/* Folder mappings */}

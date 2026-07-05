@@ -1,10 +1,12 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   aggregateIntervals,
+  adjustmentLine,
   buildInvoiceLines,
   intervalsForClient,
   invoiceSubtotal,
   normalizePath,
+  round2,
   unassignedFolders,
   weekStartKey,
   weekRange,
@@ -24,11 +26,13 @@ import {
   invoices,
   oneOffCharges,
   receipts,
+  weekAdjustments,
   type Client,
   type Invoice,
   type InvoiceLine,
   type OneOffCharge,
   type Settings,
+  type WeekAdjustment,
 } from './db/schema';
 import { getSettings } from './settings';
 
@@ -47,12 +51,13 @@ function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
 
 async function loadAll() {
   const db = getDb();
-  const [rawIntervals, rawMappings, clientRows, oneOffs, invoiceRows, s] = await Promise.all([
+  const [rawIntervals, rawMappings, clientRows, oneOffs, invoiceRows, adjRows, s] = await Promise.all([
     db.select().from(activityIntervals),
     db.select().from(folderMappings),
     db.select().from(clients).where(eq(clients.archived, 0)),
     db.select().from(oneOffCharges),
     db.select().from(invoices),
+    db.select().from(weekAdjustments),
     getSettings(),
   ]);
   return {
@@ -62,6 +67,7 @@ async function loadAll() {
     clientRows,
     oneOffs,
     invoiceRows,
+    adjRows,
     settings: s,
   };
 }
@@ -79,6 +85,13 @@ function billedWeekStarts(invoiceRows: Invoice[], clientId: string): Set<number>
   return set;
 }
 
+/** Per-week signed hours adjustment for a client, keyed by week-start ms. */
+function adjustmentsFor(rows: WeekAdjustment[], clientId: string): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const r of rows) if (r.clientId === clientId) m.set(r.weekStartMs, r.adjustHours);
+  return m;
+}
+
 /** Unbilled one-off charges for a client. */
 function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharge[] {
   return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
@@ -94,6 +107,7 @@ export interface BillableWeek {
   endMs: number;
   activeMs: number;
   amount: number;
+  adjustHours: number;
   billed: boolean;
   isCurrent: boolean;
 }
@@ -107,6 +121,7 @@ function clientWeeks(
   client: Client,
   coreMappings: CoreMapping[],
   billed: Set<number>,
+  adj: Map<number, number>,
   s: Settings,
 ): BillableWeek[] {
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
@@ -125,12 +140,15 @@ function clientWeeks(
         mappings: coreMappings,
         timeZone: s.timezone,
       });
+      const adjustHours = adj.get(startMs) ?? 0;
+      const adjLine = adjustmentLine(adjustHours, client.hourlyRate);
       return {
         weekKey,
         startMs,
         endMs,
         activeMs,
-        amount: invoiceSubtotal(lines),
+        amount: round2(invoiceSubtotal(lines) + (adjLine?.amount ?? 0)),
+        adjustHours,
         billed: billed.has(startMs),
         isCurrent: weekKey === currentKey,
       };
@@ -157,13 +175,14 @@ export interface OverviewData {
 }
 
 export async function getOverview(): Promise<OverviewData> {
-  const { intervals, coreMappings, clientRows, oneOffs, invoiceRows, settings: s } = await loadAll();
+  const { intervals, coreMappings, clientRows, oneOffs, invoiceRows, adjRows, settings: s } = await loadAll();
   const currentKey = weekStartKey(Date.now(), s.timezone);
 
   const stats: ClientStat[] = clientRows.map((client) => {
     const ci = applyFolderCutoffs(intervalsForClient(intervals, client.id, coreMappings), coreMappings);
     const billed = billedWeekStarts(invoiceRows, client.id);
-    const weeks = clientWeeks(ci, client, coreMappings, billed, s);
+    const adj = adjustmentsFor(adjRows, client.id);
+    const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
     const current = weeks.find((w) => w.isCurrent);
     return {
       client,
@@ -198,7 +217,7 @@ export interface ClientDetail {
 }
 
 export async function getClientDetail(clientId: string): Promise<ClientDetail | null> {
-  const { intervals, mappings, coreMappings, oneOffs, invoiceRows, settings: s } = await loadAll();
+  const { intervals, mappings, coreMappings, oneOffs, invoiceRows, adjRows, settings: s } = await loadAll();
   const db = getDb();
   const found = await db.select().from(clients).where(eq(clients.id, clientId));
   const client = found[0];
@@ -206,7 +225,8 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
 
   const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
   const billed = billedWeekStarts(invoiceRows, clientId);
-  const weeks = clientWeeks(ci, client, coreMappings, billed, s);
+  const adj = adjustmentsFor(adjRows, clientId);
+  const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
 
   return {
@@ -302,14 +322,21 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
 
   const invoice = invoiceRows.find((inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs);
 
+  const [adjRow] = await db
+    .select()
+    .from(weekAdjustments)
+    .where(and(eq(weekAdjustments.clientId, clientId), eq(weekAdjustments.weekStartMs, startMs)));
+  const adjLine = adjustmentLine(adjRow?.adjustHours ?? 0, client.hourlyRate);
+  const linesWithAdj = adjLine ? [...lines, adjLine] : lines;
+
   return {
     client,
     settings: s,
     weekKey,
     startMs,
     endMs,
-    lines,
-    subtotal: invoiceSubtotal(lines),
+    lines: linesWithAdj,
+    subtotal: invoiceSubtotal(linesWithAdj),
     groups,
     sessionCount: groups.reduce((n, g) => n + g.sessions.length, 0),
     billed: !!invoice,
