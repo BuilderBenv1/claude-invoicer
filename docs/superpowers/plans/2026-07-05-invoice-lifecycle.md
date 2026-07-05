@@ -152,6 +152,9 @@ CREATE TABLE IF NOT EXISTS week_adjustments (
 -- once. Partial so manual / one-off invoices (window = -1) can still repeat.
 CREATE UNIQUE INDEX IF NOT EXISTS invoices_client_week_unique
   ON invoices(client_id, prev_billed_through_ms) WHERE prev_billed_through_ms >= 0;
+
+-- One receipt per invoice (guards a concurrent double mark-paid from creating two).
+CREATE UNIQUE INDEX IF NOT EXISTS receipts_invoice_unique ON receipts(invoice_id);
 ```
 
 - [ ] **Step 2: Update Drizzle schema — invoices columns**
