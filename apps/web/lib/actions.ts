@@ -382,6 +382,54 @@ export async function adjustWeek(fd: FormData): Promise<void> {
   revalidatePath('/clients/' + clientId);
 }
 
+/**
+ * Issue (and email) an invoice for a client's unbilled one-off charges on their
+ * own — no tracked week required. Window fields are -1 (not a tracked week).
+ */
+export async function billOneOffs(fd: FormData): Promise<void> {
+  const clientId = str(fd, 'clientId');
+  if (!clientId) throw new Error('Missing client id');
+  const db = getDb();
+
+  const newInvoiceId = await db.transaction(async (tx) => {
+    const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
+    if (!s) throw new Error('Settings not initialized');
+    const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
+    if (!client) throw new Error('Client not found');
+
+    const charges = await tx
+      .select()
+      .from(oneOffCharges)
+      .where(and(eq(oneOffCharges.clientId, clientId), isNull(oneOffCharges.billedInvoiceId)));
+    if (charges.length === 0) throw new Error('No unbilled one-off charges for this client');
+
+    const subtotal = round2(charges.reduce((sum, c) => sum + c.amount, 0));
+    const { id } = await insertInvoice(tx, {
+      client,
+      settings: s,
+      lines: charges.map((c) => ({ label: c.description, hours: 0, ratePerHour: 0, amount: c.amount })),
+      subtotal,
+      prevBilledThroughMs: -1,
+      cutoffMs: -1,
+      notes: 'One-off charges',
+    });
+    for (const c of charges) {
+      await tx.update(oneOffCharges).set({ billedInvoiceId: id }).where(eq(oneOffCharges.id, c.id));
+    }
+    return id;
+  });
+
+  try {
+    await emailInvoiceById(newInvoiceId);
+  } catch (e) {
+    console.error('one-off invoice email failed', e);
+  }
+  revalidatePath('/');
+  revalidatePath('/clients/' + clientId);
+  revalidatePath('/invoices');
+  redirect('/invoices/' + newInvoiceId);
+}
+
 // ---------------- Settings ----------------
 
 export async function updateSettings(fd: FormData): Promise<void> {

@@ -12,6 +12,7 @@ import {
   issueInvoice,
   adjustWeek,
   archiveClient,
+  billOneOffs,
 } from '@/lib/actions';
 import { BillFromForm } from '@/components/bill-from-form';
 
@@ -220,9 +221,17 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">One-off charges</h2>
         <p className="text-xs text-slate-500">
-          Flat fees not based on tracked time (e.g. a fixed-price website). These are added to the
-          next invoice you issue for this client.
+          Flat fees not based on tracked time (e.g. a fixed-price website). Added to the next invoice
+          you issue for this client, or bill them on their own below.
         </p>
+        {oneOffTotal > 0 && (
+          <form action={billOneOffs}>
+            <input type="hidden" name="clientId" value={client.id} />
+            <button className="btn-primary" type="submit">
+              Bill one-offs now ({formatMoney(oneOffTotal, client.currency)})
+            </button>
+          </form>
+        )}
         <div className="space-y-2">
           {oneOffs.map((o) => (
             <div key={o.id} className="card flex items-center justify-between gap-3 py-3">
