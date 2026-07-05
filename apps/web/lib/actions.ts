@@ -3,29 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
-import {
-  buildInvoiceLines,
-  intervalsForClient,
-  invoiceSubtotal,
-  normalizePath,
-  weekRange,
-  applyFolderCutoffs,
-  type ActivityInterval as CoreInterval,
-  type FolderMapping as CoreMapping,
-} from '@claude-invoicer/core';
+import { normalizePath, round2 } from '@claude-invoicer/core';
 import { getDb } from './db';
-import {
-  activityIntervals,
-  clients,
-  folderMappings,
-  invoiceLines,
-  invoices,
-  oneOffCharges,
-  receipts,
-  settings,
-} from './db/schema';
+import { clients, folderMappings, invoices, oneOffCharges, settings } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
+import { insertInvoice, issueWeekInvoice, markPaidTx, emailInvoiceById, emailReceiptById } from './invoice-service';
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? '').trim();
@@ -226,122 +209,24 @@ export async function issueInvoice(fd: FormData): Promise<void> {
   if (!clientId) throw new Error('Missing client id');
   if (!weekStart) throw new Error('Missing week');
 
-  const db = getDb();
-
-  const newInvoiceId = await db.transaction(async (tx) => {
-    const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
-    if (!s) throw new Error('Settings not initialized');
-    const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
-    if (!client) throw new Error('Client not found');
-
-    const { startMs, endMs } = weekRange(weekStart, s.timezone);
-
-    // Guard: a given week can only be invoiced once per client.
-    const existing = await tx
-      .select()
-      .from(invoices)
-      .where(and(eq(invoices.clientId, clientId), eq(invoices.prevBilledThroughMs, startMs)));
-    if (existing[0]) {
-      throw new Error(`Week of ${weekStart} is already invoiced (${existing[0].number}).`);
-    }
-
-    const rawMappings = await tx.select().from(folderMappings);
-    const coreMappings: CoreMapping[] = rawMappings.map((m) => ({
-      clientId: m.clientId,
-      path: m.path,
-      label: m.label ?? undefined,
-      ratePerHour: m.hourlyRate ?? undefined,
-      billFromMs: m.billFromMs || undefined,
-    }));
-    const rawIntervals = await tx.select().from(activityIntervals);
-    const intervals: CoreInterval[] = rawIntervals.map((r) => ({
-      sessionId: r.sessionId,
-      cwd: r.cwd,
-      startMs: r.startMs,
-      endMs: r.endMs,
-      activeMs: r.activeMs,
-    }));
-
-    // Apply per-folder "bill from" cutoffs before windowing to the week.
-    const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
-    const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
-    const timeLines = buildInvoiceLines(ci, {
-      ratePerHour: client.hourlyRate,
-      roundIncrementMin,
-      billedThroughMs: startMs, // lower bound: start of the week
-      cutoffMs: endMs, // upper bound: end of the week
-      groupBy: 'project',
-      mappings: coreMappings,
-      timeZone: s.timezone,
-    });
-
-    const charges = includeOneOffs
-      ? await tx
-          .select()
-          .from(oneOffCharges)
-          .where(and(eq(oneOffCharges.clientId, clientId), isNull(oneOffCharges.billedInvoiceId)))
-      : [];
-
-    const subtotal =
-      invoiceSubtotal(timeLines) + Math.round(charges.reduce((sum, c) => sum + c.amount, 0) * 100) / 100;
-
-    if (timeLines.length === 0 && charges.length === 0) {
-      throw new Error(`Nothing to invoice for the week of ${weekStart}.`);
-    }
-
-    const seq = s.invoiceSeq + 1;
-    const number = `INV-${String(seq).padStart(4, '0')}`;
-    const id = newId();
-
-    await tx.insert(invoices).values({
-      id,
-      number,
-      clientId,
-      status: 'unpaid',
-      currency: client.currency,
-      subtotal: Math.round(subtotal * 100) / 100,
-      prevBilledThroughMs: startMs, // window start (identifies the billed week)
-      cutoffMs: endMs, // window end
-      notes: `Week of ${weekStart}`,
-      businessName: s.businessName,
-      businessEmail: s.businessEmail,
-      businessAddress: s.businessAddress,
-      taxId: s.taxId,
-      clientName: client.name,
-      clientEmail: client.email,
-      clientAddress: client.address,
-    });
-
-    const allLines = [
-      ...timeLines.map((l) => ({
-        invoiceId: id,
-        label: l.label,
-        hours: l.hours,
-        ratePerHour: l.ratePerHour,
-        amount: l.amount,
-      })),
-      ...charges.map((c) => ({
-        invoiceId: id,
-        label: c.description,
-        hours: 0,
-        ratePerHour: 0,
-        amount: c.amount,
-      })),
-    ];
-    await tx.insert(invoiceLines).values(allLines);
-
-    for (const c of charges) {
-      await tx.update(oneOffCharges).set({ billedInvoiceId: id }).where(eq(oneOffCharges.id, c.id));
-    }
-
-    await tx.update(settings).set({ invoiceSeq: seq }).where(eq(settings.id, 1));
-    return id;
-  });
+  const res = await issueWeekInvoice(clientId, weekStart, { includeOneOffs });
+  if (!res.ok) {
+    throw new Error(
+      res.reason === 'already-invoiced'
+        ? `Week of ${weekStart} is already invoiced.`
+        : `Nothing to invoice for the week of ${weekStart}.`,
+    );
+  }
+  try {
+    await emailInvoiceById(res.id);
+  } catch (e) {
+    console.error('invoice email failed', e);
+  }
 
   revalidatePath('/');
   revalidatePath('/clients/' + clientId);
   revalidatePath('/invoices');
-  redirect('/invoices/' + newInvoiceId);
+  redirect('/invoices/' + res.id);
 }
 
 interface ManualLineInput {
@@ -392,55 +277,24 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
     const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
     if (!client) throw new Error('Client not found');
 
-    const subtotal = Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
-    const id = newId();
+    const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
+    const issuedAt = issuedAtStr ? new Date(`${issuedAtStr}T12:00:00Z`) : undefined;
 
-    // Use a custom number as-is, otherwise take the next auto sequence.
-    let number = customNumber;
-    let seq = s.invoiceSeq;
-    if (!number) {
-      seq = s.invoiceSeq + 1;
-      number = `INV-${String(seq).padStart(4, '0')}`;
-    }
-    // Noon UTC so the date doesn't shift a day when displayed in other zones.
-    const issuedAt = issuedAtStr ? new Date(`${issuedAtStr}T12:00:00Z`) : new Date();
-
-    await tx.insert(invoices).values({
-      id,
-      number,
-      clientId,
-      status: 'unpaid',
-      currency: client.currency,
+    const { id } = await insertInvoice(tx, {
+      client,
+      settings: s,
+      lines,
       subtotal,
-      prevBilledThroughMs: -1, // not a tracked week
+      prevBilledThroughMs: -1,
       cutoffMs: -1,
       notes: 'Manual invoice',
-      businessName: s.businessName,
-      businessEmail: s.businessEmail,
-      businessAddress: s.businessAddress,
-      taxId: s.taxId,
-      clientName: client.name,
-      clientEmail: client.email,
-      clientAddress: client.address,
+      number: customNumber || undefined,
       issuedAt,
     });
-    await tx.insert(invoiceLines).values(
-      lines.map((l) => ({
-        invoiceId: id,
-        label: l.label,
-        hours: l.hours,
-        ratePerHour: l.ratePerHour,
-        amount: l.amount,
-      })),
-    );
-    if (!customNumber) await tx.update(settings).set({ invoiceSeq: seq }).where(eq(settings.id, 1));
 
     if (markPaid) {
-      const rseq = (s.receiptSeq ?? 0) + 1;
       const paidAt = paidAtStr ? new Date(`${paidAtStr}T12:00:00Z`) : new Date();
-      await tx.update(invoices).set({ status: 'paid', paidAt }).where(eq(invoices.id, id));
-      await tx.insert(receipts).values({ id: newId(), invoiceId: id, number: `RCPT-${String(rseq).padStart(4, '0')}` });
-      await tx.update(settings).set({ receiptSeq: rseq }).where(eq(settings.id, 1));
+      await markPaidTx(tx, id, paidAt);
     }
     return id;
   });
@@ -454,19 +308,14 @@ export async function markInvoicePaid(fd: FormData): Promise<void> {
   const invoiceId = str(fd, 'invoiceId');
   if (!invoiceId) throw new Error('Missing invoice id');
   const db = getDb();
-
-  await db.transaction(async (tx) => {
-    const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
-    if (!inv) throw new Error('Invoice not found');
-    if (inv.status === 'paid') return;
-    const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
-    const seq = (s?.receiptSeq ?? 0) + 1;
-    const number = `RCPT-${String(seq).padStart(4, '0')}`;
-    await tx.update(invoices).set({ status: 'paid', paidAt: new Date() }).where(eq(invoices.id, invoiceId));
-    await tx.insert(receipts).values({ id: newId(), invoiceId, number });
-    await tx.update(settings).set({ receiptSeq: seq }).where(eq(settings.id, 1));
-  });
-
+  const receiptNumber = await db.transaction((tx) => markPaidTx(tx, invoiceId));
+  if (receiptNumber) {
+    try {
+      await emailReceiptById(invoiceId);
+    } catch (e) {
+      console.error('receipt email failed', e);
+    }
+  }
   revalidatePath('/');
   revalidatePath('/invoices');
   revalidatePath('/invoices/' + invoiceId);
