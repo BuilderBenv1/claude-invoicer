@@ -446,6 +446,7 @@ export async function updateSettings(fd: FormData): Promise<void> {
       defaultRoundIncrementMin: num(fd, 'defaultRoundIncrementMin', 15),
       defaultIdleCapMin: num(fd, 'defaultIdleCapMin', 5),
       timezone: str(fd, 'timezone') || 'UTC',
+      autoSendWeekly: str(fd, 'autoSendWeekly') === '1' ? 1 : 0,
     })
     .where(eq(settings.id, 1));
   revalidatePath('/');

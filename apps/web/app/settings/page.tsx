@@ -51,6 +51,12 @@ export default async function SettingsPage() {
           </p>
         </div>
 
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input type="checkbox" name="autoSendWeekly" value="1" defaultChecked={s.autoSendWeekly === 1} />
+          Enable weekly auto-send — each day the cron issues + emails every client's previous completed
+          week (clients without an email are skipped).
+        </label>
+
         <div className="sm:col-span-2">
           <button className="btn-primary" type="submit">
             Save settings
