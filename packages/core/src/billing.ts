@@ -212,6 +212,17 @@ export function invoiceSubtotal(lines: InvoiceLine[]): number {
 }
 
 /**
+ * A signed manual adjustment to a week's billable hours, expressed as a single
+ * invoice line priced at `ratePerHour`. Returns null when the delta is zero.
+ * The delta is absolute hours (positive adds, negative discounts).
+ */
+export function adjustmentLine(adjustHours: number, ratePerHour: number): InvoiceLine | null {
+  if (!adjustHours) return null;
+  const hours = round2(adjustHours);
+  return { label: 'Time adjustment', rawMs: 0, hours, ratePerHour, amount: round2(hours * ratePerHour) };
+}
+
+/**
  * Clip each interval to its folder's "bill from" cutoff: drop the portion before
  * the cutoff of the mapping that owns the interval's cwd. Intervals fully before
  * their cutoff are removed; unmapped or uncut intervals pass through unchanged.
