@@ -4,6 +4,11 @@ import { renderInvoicePdf, renderReceiptPdf } from './pdf/render';
 import { formatMoney, formatDate } from './format';
 import type { Invoice, InvoiceLine } from './db/schema';
 
+function escapeHtml(s: string): string {
+  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return s.replace(/[&<>"']/g, (c) => map[c] ?? c);
+}
+
 function client(): Resend {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error('RESEND_API_KEY is not set');
@@ -27,13 +32,13 @@ function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: s
   const rows = lines
     .map(
       (l) =>
-        `<tr><td style="padding:6px 0;border-bottom:1px solid #e8ecf3">${l.label}</td>
+        `<tr><td style="padding:6px 0;border-bottom:1px solid #e8ecf3">${escapeHtml(l.label)}</td>
          <td style="padding:6px 0;border-bottom:1px solid #e8ecf3;text-align:right">${formatMoney(l.amount, invoice.currency)}</td></tr>`,
     )
     .join('');
   const body = `
-<p>Hi ${invoice.clientName || 'there'},</p>
-<p>Here is invoice <strong>${invoice.number}</strong>${invoice.notes ? ` (${invoice.notes})` : ''} from ${invoice.businessName || 'your contractor'}.</p>
+<p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
+<p>Here is invoice <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}.</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">${rows}
 <tr><td style="padding:10px 0;font-weight:600">Total due</td>
 <td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.subtotal, invoice.currency)}</td></tr></table>
@@ -41,15 +46,15 @@ function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: s
   <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">View &amp; pay invoice</a>
 </p>
 <p style="color:#7a8699;font-size:13px">Issued ${formatDate(invoice.issuedAt, tz)}. The full invoice PDF is attached.</p>`;
-  return shell(`<h2 style="margin:0 0 8px">Invoice ${invoice.number}</h2>`, body);
+  return shell(`<h2 style="margin:0 0 8px">Invoice ${escapeHtml(invoice.number)}</h2>`, body);
 }
 
 function receiptHtml(invoice: Invoice, receiptNumber: string | null, tz: string): string {
   const body = `
-<p>Hi ${invoice.clientName || 'there'},</p>
-<p>Thanks — we've recorded invoice <strong>${invoice.number}</strong> as paid${invoice.paidAt ? ` on ${formatDate(invoice.paidAt, tz)}` : ''}.</p>
-<p>Your receipt${receiptNumber ? ` <strong>${receiptNumber}</strong>` : ''} for ${formatMoney(invoice.subtotal, invoice.currency)} is attached.</p>`;
-  return shell(`<h2 style="margin:0 0 8px">Receipt ${receiptNumber ?? ''}</h2>`, body);
+<p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
+<p>Thanks — we've recorded invoice <strong>${escapeHtml(invoice.number)}</strong> as paid${invoice.paidAt ? ` on ${formatDate(invoice.paidAt, tz)}` : ''}.</p>
+<p>Your receipt${receiptNumber ? ` <strong>${escapeHtml(receiptNumber)}</strong>` : ''} for ${formatMoney(invoice.subtotal, invoice.currency)} is attached.</p>`;
+  return shell(`<h2 style="margin:0 0 8px">Receipt ${receiptNumber ? escapeHtml(receiptNumber) : ''}</h2>`, body);
 }
 
 export async function sendInvoiceEmail(detail: InvoiceDetail, to: string): Promise<void> {
