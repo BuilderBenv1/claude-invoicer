@@ -461,3 +461,25 @@ export async function emailInvoice(fd: FormData): Promise<void> {
   if (!res.sent) throw new Error('No recipient email — enter an address to send to.');
   revalidatePath('/invoices/' + invoiceId);
 }
+
+/** Client-facing mark-paid via the public token: marks paid, issues + emails the receipt. */
+export async function markPaidPublic(fd: FormData): Promise<void> {
+  const token = str(fd, 'token');
+  if (!token) throw new Error('Missing token');
+  const db = getDb();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.publicToken, token));
+  if (!inv) throw new Error('Invoice not found');
+
+  const receiptNumber = await db.transaction((tx) => markPaidTx(tx, inv.id));
+  if (receiptNumber) {
+    try {
+      await emailReceiptById(inv.id);
+    } catch (e) {
+      console.error('receipt email failed', e);
+    }
+  }
+  revalidatePath('/i/' + token);
+  revalidatePath('/');
+  revalidatePath('/invoices');
+  revalidatePath('/invoices/' + inv.id);
+}
