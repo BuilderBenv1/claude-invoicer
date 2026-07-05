@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
+import { WeekHoursGrid } from '@/components/week-hours-grid';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   const { token } = await params;
   const detail = await getInvoiceByToken(token);
   if (!detail) notFound();
-  const { invoice, lines, receiptNumber, settings } = detail;
+  const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
 
   return (
@@ -63,6 +64,8 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
           </tfoot>
         </table>
       </div>
+
+      {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/i/${token}/pdf`} target="_blank" rel="noreferrer">

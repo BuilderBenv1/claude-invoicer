@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getWeekDetail } from '@/lib/queries';
 import { formatDuration, formatMoney, formatDayLabel, formatTimeRange } from '@/lib/format';
 import { issueInvoice } from '@/lib/actions';
+import { WeekHoursGrid } from '@/components/week-hours-grid';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ export default async function WeekDetailPage({
   const detail = await getWeekDetail(id, week);
   if (!detail) notFound();
 
-  const { client, settings, weekKey, lines, subtotal, groups, sessionCount, billed, invoiceId, invoiceNumber, roundIncrementMin } = detail;
+  const { client, settings, weekKey, lines, subtotal, groups, sessionCount, billed, invoiceId, invoiceNumber, roundIncrementMin, dayGrid } = detail;
   const tz = settings.timezone;
 
   return (
@@ -83,6 +84,8 @@ export default async function WeekDetailPage({
           </div>
         </div>
       </section>
+
+      <WeekHoursGrid grid={dayGrid} />
 
       {/* Where the time went — sessions per folder */}
       <section className="space-y-3">

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markInvoicePaid, deleteInvoice, emailInvoice } from '@/lib/actions';
+import { WeekHoursGrid } from '@/components/week-hours-grid';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +11,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const detail = await getInvoiceDetail(id);
   if (!detail) notFound();
-  const { invoice, lines, receiptNumber, settings } = detail;
+  const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
 
   return (
@@ -72,6 +73,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           </tfoot>
         </table>
       </div>
+
+      {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
       <div className="card space-y-2">
         <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
