@@ -24,9 +24,13 @@ export {
   applyFolderCutoffs,
   intervalsForClient,
   unassignedFolders,
+  weekProjectDayGrid,
   type ClientAggregate,
   type GroupBy,
   type InvoiceLineInput,
   type InvoiceLine,
   type UnassignedFolder,
+  type WeekGridColumn,
+  type WeekGridRow,
+  type WeekProjectDayGrid,
 } from './billing.js';

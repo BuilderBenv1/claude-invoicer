@@ -278,3 +278,83 @@ export function unassignedFolders(
     .map(([cwd, v]) => ({ cwd, activeMs: v.activeMs, lastSeenMs: v.lastSeenMs }))
     .sort((a, b) => b.lastSeenMs - a.lastSeenMs);
 }
+
+export interface WeekGridColumn {
+  /** Calendar date of this day, 'YYYY-MM-DD'. */
+  dayKey: string;
+  /** 'Mon'..'Sun' — fixed, since the week runs Mon→Sun. */
+  weekday: string;
+}
+export interface WeekGridRow {
+  label: string;
+  /** Active hours per day, index-aligned to `columns` (actual time, not billing-rounded). */
+  hoursByDay: number[];
+  total: number;
+}
+export interface WeekProjectDayGrid {
+  columns: WeekGridColumn[];
+  rows: WeekGridRow[];
+  dayTotals: number[];
+  grandTotal: number;
+}
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * Per-project, per-day active-hours grid for one client's week. `weekKey` is the
+ * Monday 'YYYY-MM-DD'. Intervals should already be scoped to the client (and have
+ * folder cutoffs applied). Hours are actual active time (NOT rounded to the billing
+ * increment) so the breakdown is informational; sessions spanning midnight are split
+ * across days via activeWithin. Day/column totals are summed from raw ms then rounded
+ * once, so a column total may differ from the sum of its displayed cells by ≤0.01.
+ */
+export function weekProjectDayGrid(
+  intervals: ActivityInterval[],
+  weekKey: string,
+  timeZone: string,
+  mappings: FolderMapping[],
+): WeekProjectDayGrid {
+  const [y, m, d] = weekKey.split('-').map(Number) as [number, number, number];
+
+  // 8 local-midnight boundaries; day i spans [bounds[i], bounds[i+1]).
+  const bounds: number[] = [];
+  const columns: WeekGridColumn[] = [];
+  for (let i = 0; i <= 7; i++) {
+    const dt = new Date(Date.UTC(y, m - 1, d + i));
+    bounds.push(zonedDateToMs(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate(), timeZone));
+    if (i < 7) {
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getUTCDate()).padStart(2, '0');
+      columns.push({ dayKey: `${dt.getUTCFullYear()}-${mm}-${dd}`, weekday: WEEKDAYS[i]! });
+    }
+  }
+
+  const byProject = new Map<string, number[]>();
+  for (const it of intervals) {
+    const mp = matchMapping(it.cwd, mappings);
+    const label = mp ? mp.label ?? basename(mp.path) : basename(it.cwd);
+    let daysMs = byProject.get(label);
+    if (!daysMs) {
+      daysMs = new Array(7).fill(0);
+      byProject.set(label, daysMs);
+    }
+    for (let i = 0; i < 7; i++) {
+      const ms = activeWithin(it, bounds[i]!, bounds[i + 1]!);
+      if (ms > 0) daysMs[i]! += ms;
+    }
+  }
+
+  const rows: WeekGridRow[] = [];
+  const dayTotalsMs = new Array(7).fill(0);
+  for (const [label, daysMs] of byProject) {
+    const total = daysMs.reduce((s, ms) => s + ms, 0);
+    if (total === 0) continue;
+    for (let i = 0; i < 7; i++) dayTotalsMs[i] += daysMs[i];
+    rows.push({ label, hoursByDay: daysMs.map((ms) => round2(ms / MS_PER_HOUR)), total: round2(total / MS_PER_HOUR) });
+  }
+  rows.sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+
+  const dayTotals = dayTotalsMs.map((ms) => round2(ms / MS_PER_HOUR));
+  const grandTotal = round2(dayTotalsMs.reduce((s, ms) => s + ms, 0) / MS_PER_HOUR);
+  return { columns, rows, dayTotals, grandTotal };
+}
