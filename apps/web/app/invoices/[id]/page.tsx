@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
-import { markInvoicePaid, deleteInvoice } from '@/lib/actions';
+import { markInvoicePaid, deleteInvoice, emailInvoice } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +71,32 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <div className="card space-y-2">
+        <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="invoiceId" value={invoice.id} />
+          <div className="flex-1 min-w-[16rem]">
+            <label className="label">Client email</label>
+            <input
+              name="to"
+              type="email"
+              defaultValue={invoice.emailedTo ?? invoice.clientEmail ?? ''}
+              placeholder="client@example.com"
+              className="input"
+            />
+          </div>
+          <button className="btn-primary" type="submit">
+            {invoice.emailedAt ? 'Re-send email' : 'Email to client'}
+          </button>
+        </form>
+        {invoice.emailedAt && (
+          <p className="text-xs text-slate-500">
+            Emailed {formatDate(invoice.emailedAt, settings.timezone)}
+            {invoice.emailedTo ? ` to ${invoice.emailedTo}` : ''}. Public link:{' '}
+            <code className="text-slate-400">/i/{invoice.publicToken}</code>
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

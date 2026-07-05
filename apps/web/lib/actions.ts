@@ -451,3 +451,13 @@ export async function updateSettings(fd: FormData): Promise<void> {
   revalidatePath('/');
   revalidatePath('/settings');
 }
+
+/** Manually email (or re-send) an invoice to the given / on-file recipient. */
+export async function emailInvoice(fd: FormData): Promise<void> {
+  const invoiceId = str(fd, 'invoiceId');
+  if (!invoiceId) throw new Error('Missing invoice id');
+  const to = str(fd, 'to');
+  const res = await emailInvoiceById(invoiceId, to || undefined);
+  if (!res.sent) throw new Error('No recipient email — enter an address to send to.');
+  revalidatePath('/invoices/' + invoiceId);
+}
