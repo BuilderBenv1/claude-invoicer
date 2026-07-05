@@ -1,10 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { NeonDatabase } from 'drizzle-orm/neon-serverless';
 import {
   applyFolderCutoffs,
   intervalsForClient,
   buildInvoiceLines,
-  invoiceSubtotal,
   adjustmentLine,
   round2,
   weekRange,
@@ -62,10 +61,14 @@ export async function insertInvoice(
   const id = newId();
   const token = newToken();
   let number = a.number ?? '';
-  let seq = a.settings.invoiceSeq;
   if (!number) {
-    seq = a.settings.invoiceSeq + 1;
-    number = `INV-${String(seq).padStart(4, '0')}`;
+    const [row] = await tx
+      .update(settings)
+      .set({ invoiceSeq: sql`${settings.invoiceSeq} + 1` })
+      .where(eq(settings.id, 1))
+      .returning({ seq: settings.invoiceSeq });
+    if (!row) throw new Error('Settings not initialized');
+    number = `INV-${String(row.seq).padStart(4, '0')}`;
   }
   await tx.insert(invoices).values({
     id,
@@ -88,13 +91,12 @@ export async function insertInvoice(
     ...(a.issuedAt ? { issuedAt: a.issuedAt } : {}),
   });
   await tx.insert(invoiceLines).values(a.lines.map((l) => ({ invoiceId: id, ...l })));
-  if (!a.number) await tx.update(settings).set({ invoiceSeq: seq }).where(eq(settings.id, 1));
   return { id, number, token };
 }
 
 export type IssueResult =
   | { ok: true; id: string; number: string }
-  | { ok: false; reason: 'already-invoiced' | 'nothing' };
+  | { ok: false; reason: 'already-invoiced' | 'nothing'; number?: string };
 
 /** Issue one client's week invoice (respecting the saved adjustment + one-offs). */
 export async function issueWeekInvoice(
@@ -103,7 +105,8 @@ export async function issueWeekInvoice(
   opts: { includeOneOffs: boolean },
 ): Promise<IssueResult> {
   const db = getDb();
-  return db.transaction(async (tx): Promise<IssueResult> => {
+  try {
+    return await db.transaction(async (tx): Promise<IssueResult> => {
     const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
     if (!s) throw new Error('Settings not initialized');
     const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
@@ -115,7 +118,7 @@ export async function issueWeekInvoice(
       .select()
       .from(invoices)
       .where(and(eq(invoices.clientId, clientId), eq(invoices.prevBilledThroughMs, startMs)));
-    if (existing[0]) return { ok: false, reason: 'already-invoiced' };
+    if (existing[0]) return { ok: false, reason: 'already-invoiced', number: existing[0].number };
 
     const rawMappings = await tx.select().from(folderMappings);
     const coreMappings: CoreMapping[] = rawMappings.map((m) => ({
@@ -182,7 +185,13 @@ export async function issueWeekInvoice(
       await tx.update(oneOffCharges).set({ billedInvoiceId: id }).where(eq(oneOffCharges.id, c.id));
     }
     return { ok: true, id, number };
-  });
+    });
+  } catch (e) {
+    const code = (e as { code?: string; cause?: { code?: string } })?.code
+      ?? (e as { cause?: { code?: string } })?.cause?.code;
+    if (code === '23505') return { ok: false, reason: 'already-invoiced' };
+    throw e;
+  }
 }
 
 /** Mark an invoice paid + issue a receipt inside a transaction. Returns receipt number (null if already paid). */
@@ -190,12 +199,14 @@ export async function markPaidTx(tx: Tx, invoiceId: string, paidAt: Date = new D
   const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
   if (!inv) throw new Error('Invoice not found');
   if (inv.status === 'paid') return null;
-  const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
-  const seq = (s?.receiptSeq ?? 0) + 1;
-  const number = `RCPT-${String(seq).padStart(4, '0')}`;
+  const [row] = await tx
+    .update(settings)
+    .set({ receiptSeq: sql`${settings.receiptSeq} + 1` })
+    .where(eq(settings.id, 1))
+    .returning({ seq: settings.receiptSeq });
+  const number = `RCPT-${String((row?.seq ?? 1)).padStart(4, '0')}`;
   await tx.update(invoices).set({ status: 'paid', paidAt }).where(eq(invoices.id, invoiceId));
   await tx.insert(receipts).values({ id: newId(), invoiceId, number });
-  await tx.update(settings).set({ receiptSeq: seq }).where(eq(settings.id, 1));
   return number;
 }
 

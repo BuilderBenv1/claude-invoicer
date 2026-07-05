@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable,
   text,
@@ -107,7 +108,11 @@ export const invoices = pgTable('invoices', {
   notes: text('notes'),
   issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
   paidAt: timestamp('paid_at', { withTimezone: true }),
-});
+}, (t) => ({
+  clientWeekUnique: uniqueIndex('invoices_client_week_unique')
+    .on(t.clientId, t.prevBilledThroughMs)
+    .where(sql`${t.prevBilledThroughMs} >= 0`),
+}));
 
 export const invoiceLines = pgTable(
   'invoice_lines',

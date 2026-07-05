@@ -213,7 +213,7 @@ export async function issueInvoice(fd: FormData): Promise<void> {
   if (!res.ok) {
     throw new Error(
       res.reason === 'already-invoiced'
-        ? `Week of ${weekStart} is already invoiced.`
+        ? `Week of ${weekStart} is already invoiced${res.number ? ` (${res.number})` : ''}.`
         : `Nothing to invoice for the week of ${weekStart}.`,
     );
   }
