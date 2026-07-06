@@ -43,6 +43,19 @@ export default async function SettingsPage() {
           <input name="defaultRoundIncrementMin" type="number" defaultValue={s.defaultRoundIncrementMin} className="input" />
         </div>
         <div>
+          <label className="label">Rounding mode</label>
+          <select name="roundMode" defaultValue={s.roundMode} className="input">
+            <option value="up">Round up to increment</option>
+            <option value="nearest">Round to nearest</option>
+            <option value="down">Round down</option>
+            <option value="none">No rounding (exact)</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            How tracked time is rounded per project line, using the increment above. “Nearest” bills the
+            closest increment (e.g. 9h32m → 9.5h at 30 min).
+          </p>
+        </div>
+        <div>
           <label className="label">Idle cap (min) — informational</label>
           <input name="defaultIdleCapMin" type="number" defaultValue={s.defaultIdleCapMin} className="input" />
           <p className="mt-1 text-xs text-slate-500">

@@ -18,6 +18,7 @@ import {
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
   type WeekProjectDayGrid,
+  type RoundMode,
 } from '@claude-invoicer/core';
 import { getDb } from './db';
 import {
@@ -153,6 +154,7 @@ function clientWeeks(
       const lines = buildInvoiceLines(ci, {
         ratePerHour: client.hourlyRate,
         roundIncrementMin,
+        roundMode: s.roundMode as RoundMode,
         billedThroughMs: startMs,
         cutoffMs: endMs,
         groupBy: 'project',
@@ -308,6 +310,7 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   const lines = buildInvoiceLines(ci, {
     ratePerHour: client.hourlyRate,
     roundIncrementMin,
+    roundMode: s.roundMode as RoundMode,
     billedThroughMs: startMs,
     cutoffMs: endMs,
     groupBy: 'project',

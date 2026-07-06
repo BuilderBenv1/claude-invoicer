@@ -148,6 +148,7 @@ export const settings = pgTable('settings', {
   defaultCurrency: text('default_currency').notNull().default('USD'),
   defaultIdleCapMin: integer('default_idle_cap_min').notNull().default(5),
   defaultRoundIncrementMin: integer('default_round_increment_min').notNull().default(15),
+  roundMode: text('round_mode').notNull().default('up'),
   timezone: text('timezone').notNull().default('UTC'),
   invoiceSeq: integer('invoice_seq').notNull().default(0),
   receiptSeq: integer('receipt_seq').notNull().default(0),

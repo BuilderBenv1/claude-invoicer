@@ -445,6 +445,7 @@ export async function updateSettings(fd: FormData): Promise<void> {
       taxId: str(fd, 'taxId') || null,
       defaultCurrency: str(fd, 'defaultCurrency') || 'USD',
       defaultRoundIncrementMin: num(fd, 'defaultRoundIncrementMin', 15),
+      roundMode: str(fd, 'roundMode') || 'up',
       defaultIdleCapMin: num(fd, 'defaultIdleCapMin', 5),
       timezone: str(fd, 'timezone') || 'UTC',
       autoSendWeekly: str(fd, 'autoSendWeekly') === '1' ? 1 : 0,
