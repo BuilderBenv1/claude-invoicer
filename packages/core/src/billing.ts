@@ -8,11 +8,21 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+export type RoundMode = 'up' | 'nearest' | 'down' | 'none';
+
+/** Round a duration to an increment (minutes) by the given mode; returns minutes.
+ *  incrementMin<=0 or mode 'none' => raw minutes (no rounding). */
+export function roundMinutes(ms: number, incrementMin: number, mode: RoundMode = 'up'): number {
+  const minutes = ms / MS_PER_MIN;
+  if (incrementMin <= 0 || mode === 'none') return minutes;
+  const units = minutes / incrementMin;
+  const rounded = mode === 'up' ? Math.ceil(units) : mode === 'down' ? Math.floor(units) : Math.round(units);
+  return rounded * incrementMin;
+}
+
 /** Round a duration up to the nearest increment (in minutes); returns minutes. */
 export function roundMinutesUp(ms: number, incrementMin: number): number {
-  const minutes = ms / MS_PER_MIN;
-  if (incrementMin <= 0) return minutes;
-  return Math.ceil(minutes / incrementMin) * incrementMin;
+  return roundMinutes(ms, incrementMin, 'up');
 }
 
 /**
@@ -143,6 +153,7 @@ export interface InvoiceLineInput {
   /** Default hourly rate; per-folder mapping rates override it when present. */
   ratePerHour: number;
   roundIncrementMin: number;
+  roundMode?: RoundMode;
   /** Reset mark: only time after this is billed. */
   billedThroughMs: number;
   /** Upper bound of the billing window (typically "now" at issue time). */
@@ -171,6 +182,7 @@ export function buildInvoiceLines(
   const {
     ratePerHour,
     roundIncrementMin,
+    roundMode = 'up',
     billedThroughMs,
     cutoffMs,
     groupBy = 'total',
@@ -200,7 +212,7 @@ export function buildInvoiceLines(
 
   const lines: InvoiceLine[] = [];
   for (const [label, { ms, rate }] of groups) {
-    const hours = round2(roundMinutesUp(ms, roundIncrementMin) / 60);
+    const hours = round2(roundMinutes(ms, roundIncrementMin, roundMode) / 60);
     lines.push({ label, rawMs: ms, hours, ratePerHour: rate, amount: round2(hours * rate) });
   }
   lines.sort((a, b) => (a.label < b.label ? -1 : 1));

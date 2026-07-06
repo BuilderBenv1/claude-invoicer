@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   roundMinutesUp,
+  roundMinutes,
   weekStartKey,
   weekRange,
   aggregateIntervals,
@@ -32,6 +33,27 @@ describe('roundMinutesUp', () => {
   });
   it('returns raw minutes when increment is 0 (no rounding)', () => {
     expect(roundMinutesUp(10 * MIN, 0)).toBe(10);
+  });
+});
+
+describe('roundMinutes', () => {
+  it('up rounds to the next increment (matches roundMinutesUp)', () => {
+    expect(roundMinutes(16 * MIN, 15, 'up')).toBe(30);
+    expect(roundMinutes(15 * MIN, 15, 'up')).toBe(15);
+  });
+  it('nearest rounds to the closest increment', () => {
+    expect(roundMinutes((9 * 60 + 32) * MIN, 30, 'nearest')).toBe(570); // 9h32m -> 9.5h
+    expect(roundMinutes((9 * 60 + 47) * MIN, 30, 'nearest')).toBe(600); // 9h47m -> 10h
+    expect(roundMinutes((9 * 60 + 45) * MIN, 30, 'nearest')).toBe(600); // exactly .5 rounds up
+  });
+  it('down floors to the increment', () => {
+    expect(roundMinutes((9 * 60 + 47) * MIN, 30, 'down')).toBe(570); // 9h47m -> 9.5h
+  });
+  it('none returns raw minutes', () => {
+    expect(roundMinutes(10 * MIN, 30, 'none')).toBe(10);
+  });
+  it('a zero/negative increment returns raw minutes regardless of mode', () => {
+    expect(roundMinutes(10 * MIN, 0, 'nearest')).toBe(10);
   });
 });
 

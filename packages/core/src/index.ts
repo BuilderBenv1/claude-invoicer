@@ -12,6 +12,8 @@ export {
   MS_PER_MIN,
   round2,
   roundMinutesUp,
+  roundMinutes,
+  type RoundMode,
   activeWithin,
   activeAfter,
   weekStartKey,
