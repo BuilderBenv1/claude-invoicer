@@ -15,6 +15,7 @@
     "test:watch": "npm run test:watch --workspace @claude-invoicer/core",
     "agent": "npm run start --workspace @claude-invoicer/agent",
     "agent:once": "npm run once --workspace @claude-invoicer/agent",
-    "web": "npm --prefix apps/web run dev"
+    "web": "npm --prefix apps/web run dev",
+    "lawfirm": "npm --prefix apps/lawfirm run dev"
   }
 }
