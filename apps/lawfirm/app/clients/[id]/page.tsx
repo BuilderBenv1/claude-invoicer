@@ -40,9 +40,13 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           <summary className="cursor-pointer font-medium">＋ {t(locale, 'addCase')}</summary>
           <form action={createProject} className="grid gap-3 md:grid-cols-2 mt-4">
             <input type="hidden" name="clientId" value={client.id} />
-            <div className="md:col-span-2">
+            <div>
               <label className="label">{t(locale, 'name')}</label>
               <input name="name" className="input" required placeholder="שם התיק / Case name" />
+            </div>
+            <div>
+              <label className="label">{t(locale, 'caseNumber')}</label>
+              <input name="caseNumber" className="input" placeholder="2026-0143" />
             </div>
             <div className="md:col-span-2">
               <label className="label">{t(locale, 'description')}</label>
@@ -77,7 +81,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               return (
                 <Link key={c.project.id} href={`/cases/${c.project.id}`} className="card hover:border-slate-600 transition block">
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">{c.project.name}</span>
+                    <span className="font-medium">
+                      {c.project.caseNumber ? <span className="text-slate-500">{c.project.caseNumber} · </span> : null}
+                      {c.project.name}
+                    </span>
                     <span className={`pill ${c.project.status === 'open' ? 'bg-sky-950 text-sky-300' : 'bg-slate-800 text-slate-400'}`}>
                       {t(locale, c.project.status === 'open' ? 'open' : 'closed')}
                     </span>

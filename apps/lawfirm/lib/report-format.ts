@@ -81,6 +81,7 @@ export function reportToHtml(report: ReportData, s: Settings, locale: Locale, op
   <div class="report" dir="${dirAttr}" style="text-align:${align}">
     <div class="head">
       <div>
+        ${s.logoUrl ? `<img src="${esc(s.logoUrl)}" alt="logo" style="max-height:56px;max-width:200px;object-fit:contain;margin-bottom:6px" />` : ''}
         <h1>${esc(s.firmName)}</h1>
         <div class="muted">${[s.firmAddress, s.firmPhone, s.firmEmail].filter((x): x is string => !!x).map(esc).join(' · ')}</div>
       </div>

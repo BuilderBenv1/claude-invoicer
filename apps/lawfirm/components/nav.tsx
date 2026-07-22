@@ -12,6 +12,7 @@ export async function Nav() {
   const links = [
     { href: '/', label: t(locale, 'dashboard') },
     { href: '/clients', label: t(locale, 'clients') },
+    { href: '/invoices', label: t(locale, 'invoices') },
     { href: '/reports', label: t(locale, 'reports') },
     { href: '/settings', label: t(locale, 'settings') },
   ];

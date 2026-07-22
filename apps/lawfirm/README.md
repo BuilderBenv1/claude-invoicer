@@ -16,6 +16,12 @@ It replaces the parts of a heavier tool you use every day:
   summary with a detailed CSV attached.
 - **Hours alert per case**: set a threshold (e.g. 20h) and when the logged hours
   reach it, the **client is emailed automatically** — once per threshold.
+- **Invoices**: create an invoice from a case's tracked billable hours for a
+  period **and/or** one-off flat charges (fixed fees). Each invoice carries the
+  firm **logo**, the **case number + name**, line items, and a total; print to
+  PDF or email it to the client. Mark paid / unpaid.
+- **Firm logo & case numbers**: upload a logo in Settings (shown on invoices and
+  reports); give every case a number, a name, or both.
 
 Everything is **RTL Hebrew by default** (switchable to English in Settings).
 
@@ -29,6 +35,8 @@ Everything is **RTL Hebrew by default** (switchable to English in Settings).
 | Send a report to a set email every month | Vercel cron → `/api/cron/monthly` → configured `reportEmail` |
 | Alert at X hours in a case → inform client | Per-case `alertThresholdHours` → email to the client |
 | Client · project · task structure | `clients` → `projects` (cases) → `tasks` |
+| One-off invoices (like the Claude version) | `/invoices/new` — tracked hours and/or flat charges |
+| Attach case numbers + logo | `projects.caseNumber`, `settings.logoUrl`, snapshotted onto invoices |
 
 ## Stack
 

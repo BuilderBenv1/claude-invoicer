@@ -2,6 +2,7 @@ import { getSettings, localeOf } from '@/lib/settings';
 import { t } from '@/lib/i18n';
 import { updateSettings, sendMonthlyNow } from '@/lib/actions';
 import { prevMonthKey } from '@/lib/time';
+import { LogoUpload } from '@/components/logo-upload';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,8 @@ export default async function SettingsPage() {
           <label className="label">{t(locale, 'reportEmail')}</label>
           <input name="reportEmail" type="email" className="input" defaultValue={s.reportEmail ?? ''} placeholder="reports@..." />
         </div>
+
+        <LogoUpload locale={locale} initial={s.logoUrl} />
 
         <div className="md:col-span-2 border-t border-slate-800 pt-4 text-sm font-medium text-slate-300">
           {t(locale, 'defaultHourlyRate')} · {t(locale, 'currency')}

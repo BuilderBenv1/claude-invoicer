@@ -41,7 +41,10 @@ export default async function CasePage({ params }: { params: Promise<{ id: strin
           ← {client.name}
         </Link>
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{project.name}</h1>
+          <h1 className="text-2xl font-semibold">
+            {project.caseNumber ? <span className="text-slate-500">{project.caseNumber} · </span> : null}
+            {project.name}
+          </h1>
           <span className={`pill ${project.status === 'open' ? 'bg-sky-950 text-sky-300' : 'bg-slate-800 text-slate-400'}`}>
             {t(locale, project.status === 'open' ? 'open' : 'closed')}
           </span>
@@ -88,6 +91,9 @@ export default async function CasePage({ params }: { params: Promise<{ id: strin
             <a href={printHref} target="_blank" className="btn-ghost">
               🖶 {t(locale, 'print')}
             </a>
+            <Link href={`/invoices/new?clientId=${client.id}&projectId=${project.id}`} className="btn-green">
+              ＋ {t(locale, 'newInvoice')}
+            </Link>
             <Link href={`/reports?clientId=${client.id}&projectId=${project.id}`} className="btn-primary">
               {t(locale, 'reportFor')} →
             </Link>
@@ -205,9 +211,13 @@ export default async function CasePage({ params }: { params: Promise<{ id: strin
         <form action={updateProject} className="grid gap-3 md:grid-cols-2 mt-4">
           <input type="hidden" name="id" value={project.id} />
           <input type="hidden" name="clientId" value={client.id} />
-          <div className="md:col-span-2">
+          <div>
             <label className="label">{t(locale, 'name')}</label>
             <input name="name" className="input" defaultValue={project.name} required />
+          </div>
+          <div>
+            <label className="label">{t(locale, 'caseNumber')}</label>
+            <input name="caseNumber" className="input" defaultValue={project.caseNumber ?? ''} placeholder="2026-0143" />
           </div>
           <div className="md:col-span-2">
             <label className="label">{t(locale, 'description')}</label>

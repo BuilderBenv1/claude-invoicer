@@ -50,6 +50,8 @@ export const projects = pgTable(
       .notNull()
       .references(() => clients.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    /** Firm's case/matter number (e.g. "2026-0143"); optional, shown with the name. */
+    caseNumber: text('case_number'),
     description: text('description'),
     status: text('status').notNull().default('open'), // 'open' | 'closed'
     /** Per-case hourly rate override; null = use the client's rate. */
@@ -121,6 +123,8 @@ export const settings = pgTable('settings', {
   firmAddress: text('firm_address'),
   firmPhone: text('firm_phone'),
   taxId: text('tax_id'),
+  /** Firm logo as a URL or a data: URI (base64). Shown on invoices + reports. */
+  logoUrl: text('logo_url'),
   /** Where the automatic monthly reports are sent. */
   reportEmail: text('report_email'),
   defaultCurrency: text('default_currency').notNull().default('ILS'),
@@ -133,10 +137,68 @@ export const settings = pgTable('settings', {
   autoSendMonthly: integer('auto_send_monthly').notNull().default(0),
   /** Last month key we auto-sent (e.g. "2026-06"), so the cron fires once. */
   lastMonthlySentKey: text('last_monthly_sent_key'),
+  /** Running invoice number sequence. */
+  invoiceSeq: integer('invoice_seq').notNull().default(0),
 });
+
+/**
+ * An issued invoice. Identity fields (firm, client, logo, case number) are
+ * snapshotted at issue time so the document stays stable even if records change
+ * later. Lines can come from tracked hours and/or flat one-off charges.
+ */
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: text('id').primaryKey(),
+    number: text('number').notNull(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    status: text('status').notNull().default('unpaid'), // 'unpaid' | 'paid'
+    currency: text('currency').notNull(),
+    subtotal: doublePrecision('subtotal').notNull(),
+    notes: text('notes'),
+    // snapshots
+    firmName: text('firm_name').notNull().default(''),
+    firmEmail: text('firm_email'),
+    firmAddress: text('firm_address'),
+    firmPhone: text('firm_phone'),
+    taxId: text('tax_id'),
+    logoUrl: text('logo_url'),
+    clientName: text('client_name').notNull(),
+    clientEmail: text('client_email'),
+    clientAddress: text('client_address'),
+    caseNumber: text('case_number'),
+    caseName: text('case_name'),
+    emailedAt: timestamp('emailed_at', { withTimezone: true }),
+    emailedTo: text('emailed_to'),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+  },
+  (t) => ({ clientIdx: index('invoice_client_idx').on(t.clientId) }),
+);
+
+export const invoiceLines = pgTable(
+  'invoice_lines',
+  {
+    id: serial('id').primaryKey(),
+    invoiceId: text('invoice_id')
+      .notNull()
+      .references(() => invoices.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    /** 0/0 for a flat one-off line; otherwise hours × ratePerHour. */
+    hours: doublePrecision('hours').notNull().default(0),
+    ratePerHour: doublePrecision('rate_per_hour').notNull().default(0),
+    amount: doublePrecision('amount').notNull(),
+  },
+  (t) => ({ invoiceIdx: index('invoice_line_invoice_idx').on(t.invoiceId) }),
+);
 
 export type Client = typeof clients.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoiceLine = typeof invoiceLines.$inferSelect;

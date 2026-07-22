@@ -4,6 +4,9 @@ import type { ReportData } from './queries';
 import type { Locale } from './i18n';
 import { t, monthLabel } from './i18n';
 import { money, formatDate } from './format';
+import type { InvoiceDetail } from './invoice-service';
+import { renderInvoiceHtml } from './invoice-doc';
+
 function resend(): Resend {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error('RESEND_API_KEY is not set');
@@ -64,6 +67,22 @@ export async function sendThresholdAlert(
   });
   if (error) throw new Error(`Resend send failed: ${error.message ?? 'unknown error'}`);
   return to;
+}
+
+/** Email an invoice to a recipient — the printable invoice doc is the body. */
+export async function sendInvoiceEmail(detail: InvoiceDetail, to: string, locale: Locale): Promise<void> {
+  const inv = detail.invoice;
+  const intro =
+    locale === 'he'
+      ? `<p dir="rtl">שלום ${esc(inv.clientName || '')},</p><p dir="rtl">מצורפת חשבונית ${esc(inv.number)} מ${esc(inv.firmName)}.</p>`
+      : `<p>Hello ${esc(inv.clientName || '')},</p><p>Please find invoice ${esc(inv.number)} from ${esc(inv.firmName)} below.</p>`;
+  const { error } = await resend().emails.send({
+    from: fromAddress(),
+    to,
+    subject: locale === 'he' ? `חשבונית ${inv.number} — ${inv.firmName}` : `Invoice ${inv.number} from ${inv.firmName}`,
+    html: `${intro}${renderInvoiceHtml(detail, locale)}`,
+  });
+  if (error) throw new Error(`Resend send failed: ${error.message ?? 'unknown error'}`);
 }
 
 export interface MonthlyClientReport {
