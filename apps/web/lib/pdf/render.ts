@@ -106,10 +106,16 @@ function payToBlock(page: PDFPage, f: Fonts, details: string, y: number): number
   let yy = y - 14;
   for (const line of details.split('\n')) {
     if (!line.trim()) continue;
-    draw(page, line, M, yy, f.reg, 9, INK);
+    draw(page, fit(line, f.reg, 9, RIGHT - M), M, yy, f.reg, 9, INK);
     yy -= 12;
   }
   return yy;
+}
+
+/** Rendered height of the pay-to block for a given payment-details snapshot. */
+function payToHeight(details: string): number {
+  const lineCount = details.split('\n').filter((l) => l.trim()).length;
+  return 14 + lineCount * 12;
 }
 
 // 9-column hours grid: Project label + 7 day columns + Total, right-aligned numerics.
@@ -146,6 +152,11 @@ function drawDayGrid(page: PDFPage, f: Fonts, grid: WeekProjectDayGrid, startY: 
   return y - 22;
 }
 
+/** Rendered height of the hours-by-day grid: title + header rows + one row per project + footer. */
+function dayGridHeight(grid: WeekProjectDayGrid): number {
+  return 16 + 9 + 6 + 12 + grid.rows.length * 12 + 22;
+}
+
 // Column right edges for the line-items table.
 const COL_HOURS = RIGHT - 165;
 const COL_RATE = RIGHT - 85;
@@ -156,13 +167,27 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   const { invoice, lines, settings } = detail;
   const tz = settings.timezone;
   const doc = await PDFDocument.create();
-  const page = doc.addPage([W, H]);
+  let page = doc.addPage([W, H]);
   const f: Fonts = {
     reg: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
 
   let y = header(page, f, invoice, 'INVOICE', [invoice.number, invoice.notes ?? ''].filter(Boolean));
+
+  /**
+   * Guard against pdf-lib's silent negative-y clipping: when there isn't
+   * `needed` pts of room left above the bottom margin, start a fresh page and
+   * reset `y` to the top. Not a pagination rewrite — just stops content from
+   * being lost off the bottom of the page.
+   */
+  function ensureSpace(needed: number): number {
+    if (y - needed < M) {
+      page = doc.addPage([W, H]);
+      y = H - M;
+    }
+    return y;
+  }
 
   // Bill-to (left) + meta (right). The table starts below whichever block is lower
   // so the status never collides with the table.
@@ -189,6 +214,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   y -= 26;
 
   for (const l of lines as InvoiceLine[]) {
+    y = ensureSpace(24);
     const flat = l.hours === 0 && l.ratePerHour === 0;
     draw(page, fit(l.label, f.reg, 10, DESC_MAX), M + 8, y, f.reg, 10);
     draw(page, flat ? '—' : l.hours.toFixed(2), M, y, f.reg, 10, INK, COL_HOURS);
@@ -213,12 +239,14 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
 
   if (invoice.paymentDetails) {
     y -= 34;
+    y = ensureSpace(payToHeight(invoice.paymentDetails));
     y = payToBlock(page, f, invoice.paymentDetails, y);
   }
 
   // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
   if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
     y -= 30;
+    y = ensureSpace(dayGridHeight(detail.dayGrid));
     y = drawDayGrid(page, f, detail.dayGrid, y);
   }
 
