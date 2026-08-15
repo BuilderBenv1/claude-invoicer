@@ -71,21 +71,33 @@ New server action `deleteClient(fd)` in `lib/actions.ts`.
 `archived = 0`, so an archived client vanishes with no way back.
 
 - New action `unarchiveClient(fd)`.
-- `listClients()` gains `{ includeArchived }`; a new `listArchivedClients()` feeds
-  an "Archived (N)" section on `/clients` with **Restore** and **Delete** actions.
+- `getOverview()` returns an `archived` list alongside `stats`, feeding an
+  "Archived (N)" section with **Restore** and **Delete** actions. It moves to
+  `/clients` in Phase C.
 - Archived clients stay excluded from the dashboard, weekly billing and the cron.
 
 ## A3. Currency
 
 `clients.currency` and `settings.defaultCurrency` are free-text inputs today.
 
-- New `apps/web/lib/currencies.ts`: `CURRENCIES: { code, symbol, name }[]` —
-  GBP, USD, EUR, AUD, CAD, CHF, SEK, NOK, NZD, AED, INR, ZAR.
-- New `<CurrencySelect>` component used in: add-client, client settings, manual
-  invoice form, global settings. Shows `£ GBP — Pound Sterling`.
-- `formatMoney` in `lib/format.ts` hardcodes locale `en-US`; change to `en-GB`
-  so GBP/EUR render with the right grouping and symbol placement. Same change in
-  the `money()` helper inside `lib/pdf/render.ts`.
+- New `packages/core/src/currency.ts`: `CURRENCIES: { code, symbol, name }[]` —
+  GBP, USD, EUR, AUD, CAD, CHF, SEK, NOK, NZD, AED, INR, ZAR. It lives in core,
+  not the web app, because core is the only workspace with a test runner.
+  `currencyOptionsWith(stored)` appends a stored code that predates the
+  catalogue, so editing a client never silently rewrites their currency.
+- New `<CurrencySelect>` component used in: add-client, client settings, global
+  settings. The manual invoice form needs no selector — it derives currency from
+  the chosen client.
+- Money formatting is duplicated three times today (`lib/format.ts`,
+  `lib/pdf/render.ts`, `components/manual-invoice-form.tsx`), each hardcoding
+  locale `en-US`, so GBP renders with US grouping. One tested implementation
+  replaces all three, picking the locale from the currency (GBP→`en-GB`,
+  USD→`en-US`, EUR→`en-IE`, …) rather than one fixed locale — a fixed `en-GB`
+  would render the existing USD invoices as `US$1,234.56`.
+- Because some of those locales emit no-break spaces, and because client names
+  and addresses are free text, a `toWinAnsi(text)` sanitiser is added to core and
+  applied at the PDF drawing layer. pdf-lib's standard fonts encode cp1252 only
+  and **throw** on anything else, so this also closes an existing crash path.
 - Changing a client's currency when they already have invoices shows a warning
   ("past invoices keep their original currency") — it does not block, and it does
   not rewrite history, because invoices snapshot `currency` at issue.
