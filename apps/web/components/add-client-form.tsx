@@ -13,6 +13,13 @@ interface UnassignedFolder {
 
 const TYPE_IT = '__type__';
 
+/** Midnight today in the browser's own timezone — the server (UTC) cannot know this. */
+function startOfTodayMs(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 /**
  * Add a client and, optionally, their folder in one go. Folders are listed with
  * the time already tracked in them, so the user can see what the new client
@@ -85,8 +92,9 @@ export function AddClientForm({
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="radio" name="billFrom" value="today" />
-              Bill from today only — earlier time in this folder is excluded
+              Bill from the start of today — earlier time in this folder is excluded
             </label>
+            <input type="hidden" name="todayStartMs" value={startOfTodayMs()} />
           </fieldset>
         </>
       )}

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
-import { canDeleteClient, confirmationMatches, normalizePath, round2, weekRange } from '@claude-invoicer/core';
+import { canDeleteClient, confirmationMatches, normalizeCurrency, normalizePath, round2, weekRange } from '@claude-invoicer/core';
 import { getDb } from './db';
 import { clients, folderMappings, invoices, oneOffCharges, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
@@ -29,7 +29,12 @@ function numOrNull(fd: FormData, key: string): number | null {
 /**
  * Create a client, optionally mapping a folder in the same transaction. The
  * mapping picks up every interval already tracked under that folder and its
- * subfolders; `billFrom=today` sets a cutoff so only future work is billed.
+ * subfolders; `billFrom=today` sets a cutoff at the start of today (in the
+ * user's own browser timezone, via the `todayStartMs` hidden field) so this
+ * morning's work is still billed. Falls back to the current instant if that
+ * field is missing or unparseable (e.g. a JavaScript-disabled submit), which
+ * is the safe direction — it undercounts rather than silently billing all
+ * history.
  */
 export async function createClient(fd: FormData): Promise<void> {
   const name = str(fd, 'name');
@@ -44,7 +49,7 @@ export async function createClient(fd: FormData): Promise<void> {
       id,
       name,
       hourlyRate: num(fd, 'hourlyRate'),
-      currency: str(fd, 'currency') || s.defaultCurrency,
+      currency: normalizeCurrency(str(fd, 'currency')) || s.defaultCurrency,
       email: str(fd, 'email') || null,
       address: str(fd, 'address') || null,
     });
@@ -58,7 +63,11 @@ export async function createClient(fd: FormData): Promise<void> {
           `That folder is already assigned to ${owner?.name ?? 'another client'}. Create the client without a folder, then move the folder from that client's page.`,
         );
       }
-      const billFromMs = str(fd, 'billFrom') === 'today' ? Date.now() : 0;
+      let billFromMs = 0;
+      if (str(fd, 'billFrom') === 'today') {
+        const todayStartMs = Number(str(fd, 'todayStartMs'));
+        billFromMs = Number.isFinite(todayStartMs) && todayStartMs > 0 ? todayStartMs : Date.now();
+      }
       const label = str(fd, 'label') || null;
       await tx.insert(folderMappings).values({ id: newId(), clientId: id, path, label, billFromMs });
     }
@@ -79,7 +88,7 @@ export async function updateClient(fd: FormData): Promise<void> {
     .set({
       name: str(fd, 'name'),
       hourlyRate: num(fd, 'hourlyRate'),
-      currency: str(fd, 'currency') || 'USD',
+      currency: normalizeCurrency(str(fd, 'currency')) || 'USD',
       email: str(fd, 'email') || null,
       address: str(fd, 'address') || null,
       roundIncrementMin: round >= 0 ? round : null,
@@ -509,7 +518,7 @@ export async function updateSettings(fd: FormData): Promise<void> {
       businessEmail: str(fd, 'businessEmail') || null,
       businessAddress: str(fd, 'businessAddress') || null,
       taxId: str(fd, 'taxId') || null,
-      defaultCurrency: str(fd, 'defaultCurrency') || 'USD',
+      defaultCurrency: normalizeCurrency(str(fd, 'defaultCurrency')) || 'USD',
       defaultRoundIncrementMin: num(fd, 'defaultRoundIncrementMin', 15),
       roundMode: str(fd, 'roundMode') || 'up',
       defaultIdleCapMin: num(fd, 'defaultIdleCapMin', 5),
