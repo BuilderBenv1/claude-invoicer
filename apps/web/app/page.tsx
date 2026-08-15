@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
-import { issueInvoice, createClient, archiveClient, unarchiveClient } from '@/lib/actions';
+import { issueInvoice, archiveClient, unarchiveClient } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
-import { CurrencySelect } from '@/components/currency-select';
+import { AddClientForm } from '@/components/add-client-form';
 import { DeleteClientForm } from '@/components/delete-client-form';
 
 export const dynamic = 'force-dynamic';
@@ -162,25 +162,14 @@ export default async function OverviewPage() {
       {/* Add client */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Add a client</h2>
-        <form action={createClient} className="card grid gap-3 sm:grid-cols-4">
-          <div className="sm:col-span-2">
-            <label className="label">Name</label>
-            <input name="name" className="input" required />
-          </div>
-          <div>
-            <label className="label">Rate / hr</label>
-            <input name="hourlyRate" type="number" step="0.01" defaultValue={0} className="input" />
-          </div>
-          <div>
-            <label className="label">Currency</label>
-            <CurrencySelect name="currency" defaultValue={settings.defaultCurrency} />
-          </div>
-          <div className="sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Add client
-            </button>
-          </div>
-        </form>
+        <p className="text-xs text-slate-500">
+          Assigning a folder picks up everything already tracked in it and its subfolders.
+        </p>
+        <AddClientForm
+          unassigned={unassigned}
+          defaultCurrency={settings.defaultCurrency}
+          timezone={settings.timezone}
+        />
       </section>
     </div>
   );

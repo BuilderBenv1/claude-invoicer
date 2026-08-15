@@ -26,22 +26,45 @@ function numOrNull(fd: FormData, key: string): number | null {
 
 // ---------------- Clients ----------------
 
+/**
+ * Create a client, optionally mapping a folder in the same transaction. The
+ * mapping picks up every interval already tracked under that folder and its
+ * subfolders; `billFrom=today` sets a cutoff so only future work is billed.
+ */
 export async function createClient(fd: FormData): Promise<void> {
   const name = str(fd, 'name');
   if (!name) throw new Error('Client name is required');
+  const rawPath = str(fd, 'path');
   const db = getDb();
   const s = await getSettings();
   const id = newId();
-  await db.insert(clients).values({
-    id,
-    name,
-    hourlyRate: num(fd, 'hourlyRate'),
-    currency: str(fd, 'currency') || s.defaultCurrency,
-    email: str(fd, 'email') || null,
-    address: str(fd, 'address') || null,
+
+  await db.transaction(async (tx) => {
+    await tx.insert(clients).values({
+      id,
+      name,
+      hourlyRate: num(fd, 'hourlyRate'),
+      currency: str(fd, 'currency') || s.defaultCurrency,
+      email: str(fd, 'email') || null,
+      address: str(fd, 'address') || null,
+    });
+
+    if (rawPath) {
+      const billFromMs = str(fd, 'billFrom') === 'today' ? Date.now() : 0;
+      const label = str(fd, 'label') || null;
+      await tx
+        .insert(folderMappings)
+        .values({ id: newId(), clientId: id, path: normalizePath(rawPath), label, billFromMs })
+        .onConflictDoUpdate({
+          target: folderMappings.path,
+          set: { clientId: id, label, billFromMs },
+        });
+    }
   });
+
   revalidatePath('/');
   revalidatePath('/clients/' + id);
+  redirect('/clients/' + id);
 }
 
 export async function updateClient(fd: FormData): Promise<void> {
