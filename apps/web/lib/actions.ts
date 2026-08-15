@@ -50,15 +50,17 @@ export async function createClient(fd: FormData): Promise<void> {
     });
 
     if (rawPath) {
+      const path = normalizePath(rawPath);
+      const [existing] = await tx.select().from(folderMappings).where(eq(folderMappings.path, path));
+      if (existing) {
+        const [owner] = await tx.select().from(clients).where(eq(clients.id, existing.clientId));
+        throw new Error(
+          `That folder is already assigned to ${owner?.name ?? 'another client'}. Create the client without a folder, then move the folder from that client's page.`,
+        );
+      }
       const billFromMs = str(fd, 'billFrom') === 'today' ? Date.now() : 0;
       const label = str(fd, 'label') || null;
-      await tx
-        .insert(folderMappings)
-        .values({ id: newId(), clientId: id, path: normalizePath(rawPath), label, billFromMs })
-        .onConflictDoUpdate({
-          target: folderMappings.path,
-          set: { clientId: id, label, billFromMs },
-        });
+      await tx.insert(folderMappings).values({ id: newId(), clientId: id, path, label, billFromMs });
     }
   });
 

@@ -66,7 +66,7 @@ export function AddClientForm({
       {choice === TYPE_IT && (
         <div className="sm:col-span-4">
           <label className="label">Folder path</label>
-          <input name="path" placeholder="C:\\Users\\you\\work\\acme" className="input" required />
+          <input name="path" placeholder="C:\Users\you\work\acme" className="input" required />
         </div>
       )}
 
