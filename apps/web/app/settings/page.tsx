@@ -31,6 +31,31 @@ export default async function SettingsPage() {
           <label className="label">Tax ID</label>
           <input name="taxId" defaultValue={s.taxId ?? ''} className="input" />
         </div>
+        <div>
+          <label className="label">VAT number</label>
+          <input name="vatNumber" defaultValue={s.vatNumber ?? ''} className="input" />
+        </div>
+        <div>
+          <label className="label">VAT rate (%)</label>
+          <input name="vatRate" type="number" step="0.1" min="0" defaultValue={s.vatRate} className="input" />
+          <p className="mt-1 text-xs text-slate-500">
+            0 turns VAT off entirely — no VAT line, no VAT number printed. Set 20 once you are
+            registered. Invoices already issued keep the rate they were issued with.
+          </p>
+        </div>
+        <div>
+          <label className="label">Payment terms (days)</label>
+          <input
+            name="paymentTermsDays"
+            type="number"
+            min="0"
+            defaultValue={s.paymentTermsDays}
+            className="input"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Sets the due date printed on new invoices. 0 means due on receipt.
+          </p>
+        </div>
 
         <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Defaults</div>
         <div>

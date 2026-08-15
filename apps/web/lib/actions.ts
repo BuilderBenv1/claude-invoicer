@@ -536,6 +536,9 @@ export async function updateSettings(fd: FormData): Promise<void> {
       defaultIdleCapMin: num(fd, 'defaultIdleCapMin', 5),
       timezone: str(fd, 'timezone') || 'UTC',
       autoSendWeekly: str(fd, 'autoSendWeekly') === '1' ? 1 : 0,
+      paymentTermsDays: num(fd, 'paymentTermsDays', 14),
+      vatRate: num(fd, 'vatRate', 0),
+      vatNumber: str(fd, 'vatNumber') || null,
     })
     .where(eq(settings.id, 1));
   revalidatePath('/');
