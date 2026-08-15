@@ -41,7 +41,7 @@ export default async function WeekDetailPage({
             <input type="hidden" name="weekStart" value={weekKey} />
             <input type="hidden" name="includeOneOffs" value="0" />
             <button className="btn-primary" type="submit">
-              Invoice this week · {formatMoney(subtotal, client.currency)}
+              Invoice this week · {formatMoney(subtotal, client.currency)} net
             </button>
           </form>
         ) : null}

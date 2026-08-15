@@ -7,6 +7,7 @@ import {
   canDeleteClient,
   confirmationMatches,
   DEFAULT_ACCOUNT_KEY,
+  isKnownCurrency,
   normalizeCurrency,
   normalizePath,
   round2,
@@ -24,6 +25,10 @@ function str(fd: FormData, key: string): string {
 function num(fd: FormData, key: string, fallback = 0): number {
   const v = Number(fd.get(key));
   return Number.isFinite(v) ? v : fallback;
+}
+/** Like num(), but truncated for integer columns — a posted "14.5" must not reach an int4 column. */
+function int(fd: FormData, key: string, fallback = 0): number {
+  return Math.trunc(num(fd, key, fallback));
 }
 function numOrNull(fd: FormData, key: string): number | null {
   const raw = String(fd.get(key) ?? '').trim();
@@ -89,7 +94,7 @@ export async function createClient(fd: FormData): Promise<void> {
 export async function updateClient(fd: FormData): Promise<void> {
   const id = str(fd, 'id');
   if (!id) throw new Error('Missing client id');
-  const round = num(fd, 'roundIncrementMin', -1);
+  const round = int(fd, 'roundIncrementMin', -1);
   const db = getDb();
   await db
     .update(clients)
@@ -531,12 +536,12 @@ export async function updateSettings(fd: FormData): Promise<void> {
       businessAddress: str(fd, 'businessAddress') || null,
       taxId: str(fd, 'taxId') || null,
       defaultCurrency: normalizeCurrency(str(fd, 'defaultCurrency')) || 'USD',
-      defaultRoundIncrementMin: num(fd, 'defaultRoundIncrementMin', 15),
+      defaultRoundIncrementMin: int(fd, 'defaultRoundIncrementMin', 15),
       roundMode: str(fd, 'roundMode') || 'up',
-      defaultIdleCapMin: num(fd, 'defaultIdleCapMin', 5),
+      defaultIdleCapMin: int(fd, 'defaultIdleCapMin', 5),
       timezone: str(fd, 'timezone') || 'UTC',
       autoSendWeekly: str(fd, 'autoSendWeekly') === '1' ? 1 : 0,
-      paymentTermsDays: num(fd, 'paymentTermsDays', 14),
+      paymentTermsDays: int(fd, 'paymentTermsDays', 14),
       vatRate: num(fd, 'vatRate', 0),
       vatNumber: str(fd, 'vatNumber') || null,
     })
@@ -587,6 +592,9 @@ export async function savePaymentAccount(fd: FormData): Promise<void> {
   const raw = str(fd, 'currency');
   if (!raw) throw new Error('Pick a currency for these details');
   const currency = raw === DEFAULT_ACCOUNT_KEY ? DEFAULT_ACCOUNT_KEY : normalizeCurrency(raw);
+  if (currency !== DEFAULT_ACCOUNT_KEY && !isKnownCurrency(currency)) {
+    throw new Error(`"${currency}" isn't a currency this app knows — pick one from the list.`);
+  }
   const values = {
     accountName: str(fd, 'accountName') || null,
     bankName: str(fd, 'bankName') || null,

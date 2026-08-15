@@ -129,12 +129,13 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
             + Add line
           </button>
           <div className="text-right">
-            <div className="label">Total</div>
+            <div className="label">Subtotal (net)</div>
             <div className="text-lg font-semibold">{formatMoney(total, currency)}</div>
           </div>
         </div>
         <p className="text-xs text-slate-500">
           Enter Hours × Rate for hourly work, or leave them blank and type an Amount for a flat fee.
+          The issued total may be higher once VAT is applied.
         </p>
       </div>
 

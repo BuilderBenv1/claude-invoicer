@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { listInvoices } from '@/lib/queries';
+import { listInvoices, listPaymentAccounts } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { getSettings } from '@/lib/settings';
 import { isOverdue } from '@claude-invoicer/core';
@@ -7,7 +7,11 @@ import { isOverdue } from '@claude-invoicer/core';
 export const dynamic = 'force-dynamic';
 
 export default async function InvoicesPage() {
-  const [invoices, settings] = await Promise.all([listInvoices(), getSettings()]);
+  const [invoices, settings, paymentAccounts] = await Promise.all([
+    listInvoices(),
+    getSettings(),
+    listPaymentAccounts(),
+  ]);
   const now = Date.now();
 
   return (
@@ -18,6 +22,16 @@ export default async function InvoicesPage() {
           + New invoice
         </Link>
       </div>
+
+      {paymentAccounts.length === 0 && (
+        <div className="card border border-amber-900/40 bg-amber-950/20 text-sm text-amber-200">
+          No payment details configured — invoices will not show clients how to pay you.{' '}
+          <Link href="/settings" className="underline">
+            Add them in Settings
+          </Link>
+          .
+        </div>
+      )}
 
       {invoices.length === 0 ? (
         <div className="card text-sm text-slate-400">

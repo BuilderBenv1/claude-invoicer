@@ -61,6 +61,10 @@ export function PaymentAccountsForm({ accounts }: { accounts: AccountRow[] }) {
   const existing = new Set(accounts.map((a) => a.currency));
   const [adding, setAdding] = useState('');
   const available = CURRENCIES.filter((c) => !existing.has(c.code));
+  // `adding` is component state that survives the re-render after a successful
+  // add, but the just-added currency is no longer in `available` — so re-derive
+  // the effective selection rather than trusting the stale state directly.
+  const selected = available.some((c) => c.code === adding) ? adding : '';
   const blank: AccountRow = {
     currency: '',
     accountName: null,
@@ -120,7 +124,7 @@ export function PaymentAccountsForm({ accounts }: { accounts: AccountRow[] }) {
             <select
               name="currency"
               className="input"
-              value={adding}
+              value={selected}
               onChange={(e) => setAdding(e.target.value)}
               required
             >
@@ -130,11 +134,11 @@ export function PaymentAccountsForm({ accounts }: { accounts: AccountRow[] }) {
               ))}
             </select>
           </div>
-          {adding !== '' && (
+          {selected !== '' && (
             <>
               <AccountFields account={blank} />
               <div className="sm:col-span-2">
-                <button className="btn-primary" type="submit">Add {adding} details</button>
+                <button className="btn-primary" type="submit">Add {selected} details</button>
               </div>
             </>
           )}
