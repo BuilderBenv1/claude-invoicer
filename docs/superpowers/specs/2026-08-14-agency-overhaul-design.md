@@ -64,6 +64,12 @@ New server action `deleteClient(fd)` in `lib/actions.ts`.
   unassigned pool.
 - **Placement:** on the `/clients` row (Phase C) and on the client detail page,
   where `archiveClient` lives today.
+- **What counts as "invoiced":** only rows with `docType = 'invoice'`. A client
+  you merely sent a quote to has no billing history, and "I quoted them, they
+  never replied, delete them" is ordinary. Phase A counts all invoice rows
+  because only invoices exist yet; Phase B must add the `docType` filter when it
+  introduces quotes and pro formas. The count lives in one helper
+  (`invoiceCountFor` in `lib/queries.ts`) so that is a one-line change.
 
 ## A2. Archive / restore
 
@@ -115,7 +121,14 @@ must add a client and then find the folder in a separate unassigned list.
   (`unassignedFolders()` already returns `activeMs` and `lastSeenMs`), plus a
   free-text path field for a folder that has no activity yet.
 - A radio: **Bill all past work in this folder** (default, `billFromMs = 0`) /
-  **Bill from today** (`billFromMs = Date.now()`).
+  **Bill from the start of today**.
+- **"Bill from" always means a day boundary in the user's local time, never the
+  current instant** — `Date.now()` on a UTC server would silently drop work
+  already done earlier that day. The browser computes local midnight and submits
+  it, following the pattern `components/bill-from-form.tsx` already uses; the
+  server falls back to `Date.now()` only if that field is missing. Phase D reuses
+  this vocabulary for brief folders and must use the same rule. Where the
+  instantaneous meaning is genuinely wanted, the control is labelled "Now".
 - `createClient` is extended to accept `path`, `label` and `billFrom`, creating the
   mapping in the same transaction as the client.
 - After save, the client page shows the picked-up weeks immediately — no extra
@@ -415,6 +428,12 @@ One `.sql` file per phase in `apps/web/drizzle/`, applied by the user in the Neo
 SQL editor **before** the branch merges to `main` — auto-deploy from `main` would
 otherwise 500 against a schema that lacks the new columns. Each file is additive
 (`ADD COLUMN ... DEFAULT`, `CREATE TABLE IF NOT EXISTS`) and safe to re-run.
+
+**`apps/web/drizzle/` does not describe the live database.** `week_adjustments`,
+`round_mode` and `public_token` were all applied by hand-run SQL pasted from plan
+documents and never made it into a migration file. Phase A needs no migration so
+this is harmless today, but Phase B must **dump the live Neon schema first** and
+author its migration against that, not against the `drizzle/` snapshots.
 
 Backfills: `invoices.doc_type = 'invoice'`, `invoices.total = subtotal`,
 `invoices.tax_rate = 0`, `invoices.tax_amount = 0`.
