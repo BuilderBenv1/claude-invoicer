@@ -194,6 +194,7 @@ export interface OverviewData {
   unassigned: { cwd: string; activeMs: number; lastSeenMs: number }[];
   clients: Client[];
   currentWeekKey: string;
+  archived: { client: Client; invoiceCount: number }[];
 }
 
 export async function getOverview(): Promise<OverviewData> {
@@ -219,12 +220,20 @@ export async function getOverview(): Promise<OverviewData> {
     };
   });
 
+  const db = getDb();
+  const archivedRows = await db.select().from(clients).where(eq(clients.archived, 1)).orderBy(clients.name);
+  const archived = archivedRows.map((client) => ({
+    client,
+    invoiceCount: invoiceRows.filter((inv) => inv.clientId === client.id).length,
+  }));
+
   return {
     settings: s,
     stats: stats.sort((a, b) => b.thisWeekMs - a.thisWeekMs),
     unassigned: unassignedFolders(intervals, coreMappings),
     clients: clientRows,
     currentWeekKey: currentKey,
+    archived,
   };
 }
 

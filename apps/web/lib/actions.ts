@@ -72,6 +72,15 @@ export async function archiveClient(fd: FormData): Promise<void> {
   redirect('/');
 }
 
+export async function unarchiveClient(fd: FormData): Promise<void> {
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing client id');
+  const db = getDb();
+  await db.update(clients).set({ archived: 0 }).where(eq(clients.id, id));
+  revalidatePath('/');
+  revalidatePath('/clients/' + id);
+}
+
 /**
  * Permanently delete a client. Only clients who have never been invoiced can be
  * deleted; anyone else must be archived so the billing record survives. Folder

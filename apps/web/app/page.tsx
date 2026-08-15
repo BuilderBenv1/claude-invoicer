@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
-import { issueInvoice, createClient, archiveClient } from '@/lib/actions';
+import { issueInvoice, createClient, archiveClient, unarchiveClient } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
 import { CurrencySelect } from '@/components/currency-select';
 import { DeleteClientForm } from '@/components/delete-client-form';
@@ -9,7 +9,7 @@ import { DeleteClientForm } from '@/components/delete-client-form';
 export const dynamic = 'force-dynamic';
 
 export default async function OverviewPage() {
-  const { stats, unassigned, clients, settings, currentWeekKey } = await getOverview();
+  const { stats, unassigned, clients, settings, currentWeekKey, archived } = await getOverview();
   const clientOptions = clients.map((c) => ({ id: c.id, name: c.name }));
 
   return (
@@ -94,6 +94,45 @@ export default async function OverviewPage() {
           </div>
         )}
       </section>
+
+      {/* Archived clients */}
+      {archived.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Archived ({archived.length})
+          </h2>
+          <p className="text-xs text-slate-500">
+            Archived clients are excluded from billing, the dashboard totals and the weekly auto-send.
+          </p>
+          <div className="space-y-2">
+            {archived.map(({ client, invoiceCount }) => (
+              <div key={client.id} className="card flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <Link href={`/clients/${client.id}`} className="truncate hover:underline">
+                    {client.name}
+                  </Link>
+                  <div className="text-xs text-slate-500">
+                    {invoiceCount > 0 ? `${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}` : 'never invoiced'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <form action={unarchiveClient}>
+                    <input type="hidden" name="id" value={client.id} />
+                    <button className="btn-ghost" type="submit">
+                      Restore
+                    </button>
+                  </form>
+                  <DeleteClientForm
+                    clientId={client.id}
+                    clientName={client.name}
+                    invoiceCount={invoiceCount}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Unassigned folders */}
       <section className="space-y-3">
