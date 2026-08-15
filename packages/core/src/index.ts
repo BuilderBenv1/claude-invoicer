@@ -45,3 +45,4 @@ export {
   formatMoney,
   type CurrencyOption,
 } from './currency.js';
+export { toWinAnsi } from './text.js';

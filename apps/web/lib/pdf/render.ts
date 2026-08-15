@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import { formatMoney, type WeekProjectDayGrid } from '@claude-invoicer/core';
+import { formatMoney, toWinAnsi, type WeekProjectDayGrid } from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -36,15 +36,16 @@ function draw(
   color = INK,
   rightAlignTo?: number,
 ) {
+  const safe = toWinAnsi(text);
   let drawX = x;
-  if (rightAlignTo !== undefined) drawX = rightAlignTo - font.widthOfTextAtSize(text, size);
-  page.drawText(text, { x: drawX, y, size, font, color });
+  if (rightAlignTo !== undefined) drawX = rightAlignTo - font.widthOfTextAtSize(safe, size);
+  page.drawText(safe, { x: drawX, y, size, font, color });
 }
 
 /** Truncate a string to fit a max width at the given font/size, adding an ellipsis. */
 function fit(text: string, font: PDFFont, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  let s = text;
+  let s = toWinAnsi(text);
+  if (font.widthOfTextAtSize(s, size) <= maxWidth) return s;
   while (s.length > 1 && font.widthOfTextAtSize(s + '…', size) > maxWidth) s = s.slice(0, -1);
   return s + '…';
 }
