@@ -53,3 +53,9 @@ export {
   isOverdue,
   type InvoiceTotals,
 } from './invoicing.js';
+export {
+  DEFAULT_ACCOUNT_KEY,
+  resolvePaymentAccount,
+  renderPaymentBlock,
+  type PaymentAccount,
+} from './payment.js';
