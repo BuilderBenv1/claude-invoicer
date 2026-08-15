@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import type { WeekProjectDayGrid } from '@claude-invoicer/core';
+import { formatMoney, type WeekProjectDayGrid } from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -14,13 +14,6 @@ const MUTED = rgb(0.39, 0.45, 0.55);
 const LINE = rgb(0.886, 0.91, 0.945);
 const GREEN = rgb(0.086, 0.64, 0.29);
 
-function money(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-}
 function day(d: Date | string | number, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: 'short', day: '2-digit' }).format(
     new Date(d),
@@ -168,8 +161,8 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
     const flat = l.hours === 0 && l.ratePerHour === 0;
     draw(page, fit(l.label, f.reg, 10, DESC_MAX), M + 8, y, f.reg, 10);
     draw(page, flat ? '—' : l.hours.toFixed(2), M, y, f.reg, 10, INK, COL_HOURS);
-    draw(page, flat ? '—' : money(l.ratePerHour, invoice.currency), M, y, f.reg, 10, INK, COL_RATE);
-    draw(page, money(l.amount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    draw(page, flat ? '—' : formatMoney(l.ratePerHour, invoice.currency), M, y, f.reg, 10, INK, COL_RATE);
+    draw(page, formatMoney(l.amount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
     page.drawLine({ start: { x: M, y: y - 9 }, end: { x: RIGHT, y: y - 9 }, thickness: 0.5, color: LINE });
     y -= 24;
   }
@@ -177,7 +170,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   // Total
   y -= 10;
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
-  draw(page, money(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+  draw(page, formatMoney(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
 
   // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
   if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
@@ -221,7 +214,7 @@ export async function renderReceiptPdf(detail: InvoiceDetail): Promise<Uint8Arra
   const cy = y - 120;
   const lbl = 'AMOUNT PAID';
   draw(page, lbl, (W - f.reg.widthOfTextAtSize(lbl, 8)) / 2, cy + 44, f.reg, 8, MUTED);
-  const amt = money(invoice.subtotal, invoice.currency);
+  const amt = formatMoney(invoice.subtotal, invoice.currency);
   draw(page, amt, (W - f.bold.widthOfTextAtSize(amt, 30)) / 2, cy + 14, f.bold, 30);
   const paid = 'PAID IN FULL';
   draw(page, paid, (W - f.bold.widthOfTextAtSize(paid, 13)) / 2, cy - 8, f.bold, 13, GREEN);

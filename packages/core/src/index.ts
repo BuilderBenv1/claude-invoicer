@@ -36,3 +36,12 @@ export {
   type WeekGridRow,
   type WeekProjectDayGrid,
 } from './billing.js';
+export {
+  CURRENCIES,
+  normalizeCurrency,
+  isKnownCurrency,
+  currencySymbol,
+  currencyOptionsWith,
+  formatMoney,
+  type CurrencyOption,
+} from './currency.js';

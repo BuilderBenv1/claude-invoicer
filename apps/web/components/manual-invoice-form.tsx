@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { createManualInvoice } from '@/lib/actions';
+import { formatMoney } from '@claude-invoicer/core';
 
 interface ClientOption {
   id: string;
@@ -14,14 +15,6 @@ interface Row {
   hours: string;
   rate: string;
   amount: string;
-}
-
-function money(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
 }
 
 const blankRow = (): Row => ({ label: '', hours: '', rate: '', amount: '' });
@@ -137,7 +130,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
           </button>
           <div className="text-right">
             <div className="label">Total</div>
-            <div className="text-lg font-semibold">{money(total, currency)}</div>
+            <div className="text-lg font-semibold">{formatMoney(total, currency)}</div>
           </div>
         </div>
         <p className="text-xs text-slate-500">
