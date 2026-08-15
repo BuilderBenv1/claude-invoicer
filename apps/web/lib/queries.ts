@@ -185,6 +185,7 @@ export interface ClientStat {
   unbilledWeeks: number;
   oneOffTotal: number;
   roundIncrementMin: number;
+  invoiceCount: number;
 }
 
 export interface OverviewData {
@@ -205,6 +206,7 @@ export async function getOverview(): Promise<OverviewData> {
     const adj = adjustmentsFor(adjRows, client.id);
     const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
     const current = weeks.find((w) => w.isCurrent);
+    const invoiceCount = invoiceRows.filter((inv) => inv.clientId === client.id).length;
     return {
       client,
       thisWeekMs: current?.activeMs ?? 0,
@@ -213,6 +215,7 @@ export async function getOverview(): Promise<OverviewData> {
       unbilledWeeks: weeks.filter((w) => !w.billed && (w.activeMs > 0 || w.adjustHours !== 0)).length,
       oneOffTotal: sumAmounts(unbilledOneOffs(oneOffs, client.id)),
       roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
+      invoiceCount,
     };
   });
 
@@ -235,6 +238,7 @@ export interface ClientDetail {
   oneOffTotal: number;
   roundIncrementMin: number;
   currentWeekKey: string;
+  invoiceCount: number;
 }
 
 export async function getClientDetail(clientId: string): Promise<ClientDetail | null> {
@@ -249,6 +253,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
   const adj = adjustmentsFor(adjRows, clientId);
   const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
+  const invoiceCount = invoiceRows.filter((inv) => inv.clientId === clientId).length;
 
   return {
     client,
@@ -260,6 +265,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
     oneOffTotal: sumAmounts(clientOneOffs),
     roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
     currentWeekKey: weekStartKey(Date.now(), s.timezone),
+    invoiceCount,
   };
 }
 

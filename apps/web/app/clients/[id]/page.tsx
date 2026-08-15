@@ -16,6 +16,7 @@ import {
 } from '@/lib/actions';
 import { BillFromForm } from '@/components/bill-from-form';
 import { CurrencySelect } from '@/components/currency-select';
+import { DeleteClientForm } from '@/components/delete-client-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const detail = await getClientDetail(id);
   if (!detail) notFound();
 
-  const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey } = detail;
+  const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey, invoiceCount } = detail;
   const billableWeeks = weeks.filter((w) => w.activeMs > 0 || w.billed || w.adjustHours !== 0);
   const stepH = Math.round((roundIncrementMin / 60) * 100) / 100;
 
@@ -304,12 +305,15 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             </button>
           </div>
         </form>
-        <form action={archiveClient}>
-          <input type="hidden" name="id" value={client.id} />
-          <button className="btn-danger" type="submit">
-            Archive client
-          </button>
-        </form>
+        <div className="flex flex-wrap items-center gap-3">
+          <form action={archiveClient}>
+            <input type="hidden" name="id" value={client.id} />
+            <button className="btn-ghost" type="submit">
+              Archive client
+            </button>
+          </form>
+          <DeleteClientForm clientId={client.id} clientName={client.name} invoiceCount={invoiceCount} />
+        </div>
       </section>
 
       {/* Recent sessions */}

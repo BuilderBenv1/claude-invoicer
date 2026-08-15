@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
-import { issueInvoice, createClient } from '@/lib/actions';
+import { issueInvoice, createClient, archiveClient } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
 import { CurrencySelect } from '@/components/currency-select';
+import { DeleteClientForm } from '@/components/delete-client-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export default async function OverviewPage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {stats.map(({ client, thisWeekMs, thisWeekAmount, thisWeekBilled, unbilledWeeks, oneOffTotal }) => (
+            {stats.map(({ client, thisWeekMs, thisWeekAmount, thisWeekBilled, unbilledWeeks, oneOffTotal, invoiceCount }) => (
               <div key={client.id} className="card">
                 <div className="flex items-start justify-between">
                   <div>
@@ -69,11 +70,24 @@ export default async function OverviewPage() {
                     <div className="font-semibold">{unbilledWeeks}</div>
                   </div>
                 </div>
-                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                   <span>{oneOffTotal > 0 ? `+ ${formatMoney(oneOffTotal, client.currency)} one-off charges` : ''}</span>
-                  <Link href={`/clients/${client.id}`} className="hover:underline">
-                    All weeks →
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/clients/${client.id}`} className="hover:underline">
+                      All weeks →
+                    </Link>
+                    <form action={archiveClient}>
+                      <input type="hidden" name="id" value={client.id} />
+                      <button className="btn-ghost" type="submit">
+                        Archive
+                      </button>
+                    </form>
+                    <DeleteClientForm
+                      clientId={client.id}
+                      clientName={client.name}
+                      invoiceCount={invoiceCount}
+                    />
+                  </div>
                 </div>
               </div>
             ))}

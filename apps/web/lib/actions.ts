@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
-import { normalizePath, round2, weekRange } from '@claude-invoicer/core';
+import { canDeleteClient, confirmationMatches, normalizePath, round2, weekRange } from '@claude-invoicer/core';
 import { getDb } from './db';
 import { clients, folderMappings, invoices, oneOffCharges, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
@@ -68,6 +68,38 @@ export async function archiveClient(fd: FormData): Promise<void> {
   const id = str(fd, 'id');
   const db = getDb();
   await db.update(clients).set({ archived: 1 }).where(eq(clients.id, id));
+  revalidatePath('/');
+  redirect('/');
+}
+
+/**
+ * Permanently delete a client. Only clients who have never been invoiced can be
+ * deleted; anyone else must be archived so the billing record survives. Folder
+ * mappings, one-off charges and week adjustments cascade; the raw activity
+ * intervals are kept and their folders simply return to the unassigned pool.
+ */
+export async function deleteClient(fd: FormData): Promise<void> {
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing client id');
+  const db = getDb();
+
+  await db.transaction(async (tx) => {
+    const [client] = await tx.select().from(clients).where(eq(clients.id, id));
+    if (!client) throw new Error('Client not found');
+
+    const clientInvoices = await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.clientId, id));
+    const check = canDeleteClient(client.name, clientInvoices.length);
+    if (!check.allowed) throw new Error(check.reason);
+
+    if (!confirmationMatches(str(fd, 'confirmName'), client.name)) {
+      throw new Error(`Type “${client.name}” exactly to confirm deletion.`);
+    }
+
+    // An invoice created between the check and this delete makes the foreign
+    // key reject the statement, which is the safe outcome.
+    await tx.delete(clients).where(eq(clients.id, id));
+  });
+
   revalidatePath('/');
   redirect('/');
 }
