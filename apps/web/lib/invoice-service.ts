@@ -80,7 +80,7 @@ export async function insertInvoice(
   const totals = computeTotals(a.subtotal, a.settings.vatRate);
   const issuedAt = a.issuedAt ?? new Date();
   const termsDays = a.settings.paymentTermsDays;
-  const dueAt = dueDateFrom(issuedAt, termsDays);
+  const dueAt = dueDateFrom(issuedAt, termsDays, a.settings.timezone);
 
   const accounts = await tx.select().from(paymentAccounts);
   const paymentDetails = renderPaymentBlock(

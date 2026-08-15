@@ -30,17 +30,45 @@ describe('computeTotals', () => {
 
 describe('dueDateFrom', () => {
   const issued = new Date('2026-08-14T12:00:00.000Z');
-  it('adds the term in whole days', () => {
-    expect(dueDateFrom(issued, 14)?.toISOString()).toBe('2026-08-28T12:00:00.000Z');
+  it('lands on the calendar date the term implies, at the last instant of that day', () => {
+    expect(dueDateFrom(issued, 14, 'UTC')?.toISOString()).toBe('2026-08-28T23:59:59.999Z');
   });
   it('returns null when there are no payment terms', () => {
-    expect(dueDateFrom(issued, 0)).toBeNull();
+    expect(dueDateFrom(issued, 0, 'UTC')).toBeNull();
   });
   it('returns null for a negative term rather than a date in the past', () => {
-    expect(dueDateFrom(issued, -3)).toBeNull();
+    expect(dueDateFrom(issued, -3, 'UTC')).toBeNull();
   });
   it('crosses a month boundary correctly', () => {
-    expect(dueDateFrom(new Date('2026-08-25T00:00:00.000Z'), 10)?.toISOString()).toBe('2026-09-04T00:00:00.000Z');
+    expect(dueDateFrom(new Date('2026-08-25T00:00:00.000Z'), 10, 'UTC')?.toISOString()).toBe(
+      '2026-09-04T23:59:59.999Z',
+    );
+  });
+  it('is not overdue at any point on its due date, but is overdue just after the midnight following it', () => {
+    // Issued late in the day — the due date must still be the *next* calendar day
+    // in full, not "the same time of day, N days later".
+    const issuedLate = new Date('2026-08-14T23:30:00.000Z');
+    const due = dueDateFrom(issuedLate, 1, 'UTC');
+    expect(due?.toISOString()).toBe('2026-08-15T23:59:59.999Z');
+    const dueMs = due!.getTime();
+    // Nowhere on 2026-08-15 (the due date) is it overdue...
+    expect(isOverdue('unpaid', due, new Date('2026-08-15T00:00:00.000Z').getTime())).toBe(false);
+    expect(isOverdue('unpaid', due, new Date('2026-08-15T12:00:00.000Z').getTime())).toBe(false);
+    expect(isOverdue('unpaid', due, dueMs)).toBe(false);
+    // ...but it is the instant the following day begins.
+    expect(isOverdue('unpaid', due, dueMs + 1)).toBe(true);
+  });
+  it('lands on the expected calendar date across a BST→GMT transition in Europe/London', () => {
+    // Clocks go back in Europe/London at 2026-10-25 02:00 BST (01:00 UTC), so
+    // this issue date's due date spans the transition. Issued just after local
+    // midnight (2026-10-20 00:30 BST = 2026-10-19T23:30Z); fixed ms arithmetic
+    // (the old bug) drifts this to 2026-10-26 once the clocks fall back — a full
+    // calendar day early versus the correct 2026-10-27.
+    const issuedLondon = new Date('2026-10-19T23:30:00.000Z');
+    const due = dueDateFrom(issuedLondon, 7, 'Europe/London');
+    expect(due?.toISOString()).toBe('2026-10-27T23:59:59.999Z');
+    const dateKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(due);
+    expect(dateKey).toBe('2026-10-27');
   });
 });
 

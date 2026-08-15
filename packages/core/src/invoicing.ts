@@ -1,6 +1,4 @@
-import { round2 } from './billing.js';
-
-const MS_PER_DAY = 86_400_000;
+import { round2, zonedDateToMs } from './billing.js';
 
 export interface InvoiceTotals {
   /** Net of tax. */
@@ -23,10 +21,31 @@ export function computeTotals(subtotal: number, taxRate: number): InvoiceTotals 
   return { subtotal: round2(subtotal), taxRate: rate, taxAmount, total: round2(round2(subtotal) + taxAmount) };
 }
 
-/** Payment due date, or null when the terms are zero or nonsensical (due on receipt). */
-export function dueDateFrom(issuedAt: Date, termsDays: number): Date | null {
+/** The Y/M/D of a UTC instant as seen in `timeZone`. */
+function zonedYMD(ms: number, timeZone: string): { y: number; m: number; d: number } {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = fmt.formatToParts(new Date(ms));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return { y: get('year'), m: get('month'), d: get('day') };
+}
+
+/**
+ * Payment due date, or null when the terms are zero or nonsensical (due on receipt).
+ * Means the END of the due day in the business timezone: the calendar date
+ * `termsDays` days after `issuedAt` (as seen in `timeZone`), through its last
+ * instant. Computed via calendar-day arithmetic (not fixed ms), so it neither
+ * drifts across a DST transition nor flips to true on its own due date.
+ */
+export function dueDateFrom(issuedAt: Date, termsDays: number, timeZone: string): Date | null {
   if (!Number.isFinite(termsDays) || termsDays <= 0) return null;
-  return new Date(issuedAt.getTime() + Math.floor(termsDays) * MS_PER_DAY);
+  const days = Math.floor(termsDays);
+  const { y, m, d } = zonedYMD(issuedAt.getTime(), timeZone);
+  // Day after the due day, via UTC placeholder arithmetic (handles month/year
+  // rollover), then re-anchored to the timezone — same pattern as weekRange.
+  const nextDay = new Date(Date.UTC(y, m - 1, d + days + 1));
+  const endOfDueDayMs =
+    zonedDateToMs(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), timeZone) - 1;
+  return new Date(endOfDueDayMs);
 }
 
 /** Unpaid and past its due date. Derived on read — never stored. */
