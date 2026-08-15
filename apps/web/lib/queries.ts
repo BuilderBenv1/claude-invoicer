@@ -116,6 +116,11 @@ function adjustmentsFor(rows: WeekAdjustment[], clientId: string): Map<number, n
 function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharge[] {
   return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
 }
+
+/** Count of invoices billed to a client. Phase B will add `&& inv.docType === 'invoice'` here. */
+function invoiceCountFor(invoiceRows: Invoice[], clientId: string): number {
+  return invoiceRows.filter((inv) => inv.clientId === clientId).length;
+}
 function sumAmounts(items: { amount: number }[]): number {
   return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 }
@@ -207,7 +212,7 @@ export async function getOverview(): Promise<OverviewData> {
     const adj = adjustmentsFor(adjRows, client.id);
     const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
     const current = weeks.find((w) => w.isCurrent);
-    const invoiceCount = invoiceRows.filter((inv) => inv.clientId === client.id).length;
+    const invoiceCount = invoiceCountFor(invoiceRows, client.id);
     return {
       client,
       thisWeekMs: current?.activeMs ?? 0,
@@ -224,7 +229,7 @@ export async function getOverview(): Promise<OverviewData> {
   const archivedRows = await db.select().from(clients).where(eq(clients.archived, 1)).orderBy(clients.name);
   const archived = archivedRows.map((client) => ({
     client,
-    invoiceCount: invoiceRows.filter((inv) => inv.clientId === client.id).length,
+    invoiceCount: invoiceCountFor(invoiceRows, client.id),
   }));
 
   return {
@@ -262,7 +267,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
   const adj = adjustmentsFor(adjRows, clientId);
   const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
-  const invoiceCount = invoiceRows.filter((inv) => inv.clientId === clientId).length;
+  const invoiceCount = invoiceCountFor(invoiceRows, clientId);
 
   return {
     client,
