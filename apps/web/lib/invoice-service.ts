@@ -8,6 +8,10 @@ import {
   round2,
   weekRange,
   weekStartKey,
+  computeTotals,
+  dueDateFrom,
+  resolvePaymentAccount,
+  renderPaymentBlock,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
   type RoundMode,
@@ -20,6 +24,7 @@ import {
   invoiceLines,
   invoices,
   oneOffCharges,
+  paymentAccounts,
   receipts,
   settings,
   weekAdjustments,
@@ -71,13 +76,31 @@ export async function insertInvoice(
     if (!row) throw new Error('Settings not initialized');
     number = `INV-${String(row.seq).padStart(4, '0')}`;
   }
+
+  const totals = computeTotals(a.subtotal, a.settings.vatRate);
+  const issuedAt = a.issuedAt ?? new Date();
+  const termsDays = a.settings.paymentTermsDays;
+  const dueAt = dueDateFrom(issuedAt, termsDays);
+
+  const accounts = await tx.select().from(paymentAccounts);
+  const paymentDetails = renderPaymentBlock(
+    resolvePaymentAccount(accounts, a.client.currency),
+    number,
+  );
+
   await tx.insert(invoices).values({
     id,
     number,
     clientId: a.client.id,
     status: 'unpaid',
     currency: a.client.currency,
-    subtotal: round2(a.subtotal),
+    subtotal: totals.subtotal,
+    taxRate: totals.taxRate,
+    taxAmount: totals.taxAmount,
+    total: totals.total,
+    paymentTermsDays: termsDays,
+    dueAt,
+    paymentDetails: paymentDetails || null,
     prevBilledThroughMs: a.prevBilledThroughMs,
     cutoffMs: a.cutoffMs,
     notes: a.notes,
@@ -89,7 +112,7 @@ export async function insertInvoice(
     clientName: a.client.name,
     clientEmail: a.client.email,
     clientAddress: a.client.address,
-    ...(a.issuedAt ? { issuedAt: a.issuedAt } : {}),
+    issuedAt,
   });
   await tx.insert(invoiceLines).values(a.lines.map((l) => ({ invoiceId: id, ...l })));
   return { id, number, token };
