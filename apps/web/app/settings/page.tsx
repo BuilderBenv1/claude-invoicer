@@ -39,8 +39,9 @@ export default async function SettingsPage() {
           <label className="label">VAT rate (%)</label>
           <input name="vatRate" type="number" step="0.1" min="0" defaultValue={s.vatRate} className="input" />
           <p className="mt-1 text-xs text-slate-500">
-            0 turns VAT off entirely — no VAT line, no VAT number printed. Set 20 once you are
-            registered. Invoices already issued keep the rate they were issued with.
+            0 turns off VAT — no VAT line on invoices. Set 20 once you are registered. The VAT
+            number above prints on every invoice whenever it is filled in, whether or not VAT is
+            on. Invoices already issued keep the rate and number they were issued with.
           </p>
         </div>
         <div>

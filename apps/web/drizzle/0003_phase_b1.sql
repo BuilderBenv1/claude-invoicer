@@ -8,6 +8,7 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_details text;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_rate double precision NOT NULL DEFAULT 0;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_amount double precision NOT NULL DEFAULT 0;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total double precision NOT NULL DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_number text;
 
 -- Existing invoices carry no VAT, so their payable total is their subtotal.
 -- Runs once; after this, `total` is written at issue time.

@@ -109,6 +109,7 @@ export const invoices = pgTable('invoices', {
   businessEmail: text('business_email'),
   businessAddress: text('business_address'),
   taxId: text('tax_id'),
+  vatNumber: text('vat_number'),
   publicToken: text('public_token'),
   emailedAt: timestamp('emailed_at', { withTimezone: true }),
   emailedTo: text('emailed_to'),

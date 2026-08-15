@@ -109,6 +109,7 @@ export async function insertInvoice(
     businessEmail: a.settings.businessEmail,
     businessAddress: a.settings.businessAddress,
     taxId: a.settings.taxId,
+    vatNumber: a.settings.vatNumber,
     clientName: a.client.name,
     clientEmail: a.client.email,
     clientAddress: a.client.address,

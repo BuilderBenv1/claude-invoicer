@@ -73,7 +73,12 @@ function header(page: PDFPage, f: Fonts, invoice: Invoice, title: string, subtit
   let by = y - 4;
   draw(page, invoice.businessName || 'My Business', M, by, f.bold, 11, INK, RIGHT);
   by -= 13;
-  for (const v of [invoice.businessEmail, invoice.businessAddress, invoice.taxId ? `Tax ID: ${invoice.taxId}` : null]) {
+  for (const v of [
+    invoice.businessEmail,
+    invoice.businessAddress,
+    invoice.taxId ? `Tax ID: ${invoice.taxId}` : null,
+    invoice.vatNumber ? `VAT No: ${invoice.vatNumber}` : null,
+  ]) {
     if (!v) continue;
     draw(page, v, M, by, f.reg, 9, MUTED, RIGHT);
     by -= 12;

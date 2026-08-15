@@ -13,6 +13,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   if (!detail) notFound();
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
+  const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 p-6">
@@ -23,16 +24,15 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
             {invoice.number} · issued {formatDate(invoice.issuedAt, settings.timezone)}
             {invoice.notes ? ` · ${invoice.notes}` : ''}
           </div>
+          {invoice.vatNumber && <div className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</div>}
         </div>
-        <span
-          className={
-            paid
-              ? 'rounded bg-green-900/40 px-3 py-1 text-sm text-green-300'
-              : 'rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300'
-          }
-        >
-          {invoice.status}
-        </span>
+        {paid ? (
+          <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
+        ) : overdue ? (
+          <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
+        ) : (
+          <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
+        )}
       </header>
 
       <div className="text-sm text-slate-400">
@@ -60,18 +60,16 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
               <td className="pt-3 font-semibold">Total due</td>
               <td className="pt-3 text-right text-lg font-semibold">
                 {formatMoney(invoice.total, invoice.currency)}
-                {invoice.taxAmount > 0 && (
+                {invoice.taxAmount !== 0 && (
                   <div className="text-xs font-normal text-slate-500">
                     Net {formatMoney(invoice.subtotal, invoice.currency)} · VAT {invoice.taxRate}%{' '}
                     {formatMoney(invoice.taxAmount, invoice.currency)}
                   </div>
                 )}
                 {invoice.dueAt && (
-                  <div
-                    className={`text-xs font-normal ${isOverdue(invoice.status, invoice.dueAt, Date.now()) ? 'text-red-300' : 'text-slate-500'}`}
-                  >
+                  <div className={`text-xs font-normal ${overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
-                    {isOverdue(invoice.status, invoice.dueAt, Date.now()) ? ' — overdue' : ''}
+                    {overdue ? ' — overdue' : ''}
                   </div>
                 )}
               </td>
