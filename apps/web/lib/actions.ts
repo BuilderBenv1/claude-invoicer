@@ -291,7 +291,9 @@ export async function issueInvoice(fd: FormData): Promise<void> {
         ? `Week of ${weekStart} is already invoiced${res.number ? ` (${res.number})` : ''}.`
         : res.reason === 'week-not-finished'
           ? `The week of ${weekStart} isn't finished yet — you can invoice it once it ends.`
-          : `Nothing to invoice for the week of ${weekStart}.`;
+          : res.reason === 'client-archived'
+            ? 'This client is archived. Restore them before issuing an invoice.'
+            : `Nothing to invoice for the week of ${weekStart}.`;
     throw new Error(msg);
   }
   try {
@@ -353,6 +355,7 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
     if (!s) throw new Error('Settings not initialized');
     const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
     if (!client) throw new Error('Client not found');
+    if (client.archived) throw new Error('This client is archived. Restore them before issuing an invoice.');
 
     const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
     const issuedAt = issuedAtStr ? new Date(`${issuedAtStr}T12:00:00Z`) : undefined;
@@ -472,6 +475,7 @@ export async function billOneOffs(fd: FormData): Promise<void> {
     if (!s) throw new Error('Settings not initialized');
     const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
     if (!client) throw new Error('Client not found');
+    if (client.archived) throw new Error('This client is archived. Restore them before issuing an invoice.');
 
     const charges = await tx
       .select()
