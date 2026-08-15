@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { toWinAnsi } from '../src/text.js';
+import { CURRENCIES, formatMoney } from '../src/currency.js';
 
 describe('toWinAnsi', () => {
   it('leaves plain ASCII untouched', () => {
@@ -20,5 +21,26 @@ describe('toWinAnsi', () => {
   });
   it('handles an empty string', () => {
     expect(toWinAnsi('')).toBe('');
+  });
+});
+
+describe('toWinAnsi over formatMoney output', () => {
+  it('never replaces a character in any catalogue currency, positive, negative or zero', () => {
+    for (const c of CURRENCIES) {
+      for (const amount of [1234.56, -1234.56, 0]) {
+        const formatted = formatMoney(amount, c.code);
+        expect(toWinAnsi(formatted), `${c.code} ${amount}`).not.toContain('?');
+      }
+    }
+  });
+  it('preserves the sign of a negative amount in every catalogue currency', () => {
+    for (const c of CURRENCIES) {
+      expect(toWinAnsi(formatMoney(-1234.56, c.code)), c.code).toContain('-');
+    }
+  });
+  it('is idempotent — fit() sanitises and draw() sanitises its output again', () => {
+    for (const s of ['−1 234,56 kr', 'Café — €10', '₹100', '日本']) {
+      expect(toWinAnsi(toWinAnsi(s))).toBe(toWinAnsi(s));
+    }
   });
 });
