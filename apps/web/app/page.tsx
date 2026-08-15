@@ -3,6 +3,7 @@ import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
 import { issueInvoice, createClient } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
+import { CurrencySelect } from '@/components/currency-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,7 +120,7 @@ export default async function OverviewPage() {
           </div>
           <div>
             <label className="label">Currency</label>
-            <input name="currency" defaultValue={settings.defaultCurrency} className="input" />
+            <CurrencySelect name="currency" defaultValue={settings.defaultCurrency} />
           </div>
           <div className="sm:col-span-4">
             <button className="btn-primary" type="submit">

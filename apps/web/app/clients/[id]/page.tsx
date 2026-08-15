@@ -15,6 +15,7 @@ import {
   billOneOffs,
 } from '@/lib/actions';
 import { BillFromForm } from '@/components/bill-from-form';
+import { CurrencySelect } from '@/components/currency-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -275,7 +276,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           </div>
           <div>
             <label className="label">Currency</label>
-            <input name="currency" defaultValue={client.currency} className="input" />
+            <CurrencySelect name="currency" defaultValue={client.currency} />
+            <p className="mt-1 text-xs text-slate-500">
+              Invoices already issued keep the currency they were issued in.
+            </p>
           </div>
           <div>
             <label className="label">Rounding override (min, blank = default {settings.defaultRoundIncrementMin})</label>

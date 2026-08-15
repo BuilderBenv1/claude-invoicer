@@ -1,5 +1,6 @@
 import { getSettings } from '@/lib/settings';
 import { updateSettings } from '@/lib/actions';
+import { CurrencySelect } from '@/components/currency-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,8 @@ export default async function SettingsPage() {
         <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Defaults</div>
         <div>
           <label className="label">Default currency</label>
-          <input name="defaultCurrency" defaultValue={s.defaultCurrency} className="input" />
+          <CurrencySelect name="defaultCurrency" defaultValue={s.defaultCurrency} />
+          <p className="mt-1 text-xs text-slate-500">Used for new clients. Existing clients keep their own.</p>
         </div>
         <div>
           <label className="label">Timezone (IANA, e.g. Asia/Jerusalem)</label>
