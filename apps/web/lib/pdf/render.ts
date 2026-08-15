@@ -95,6 +95,18 @@ function partyBlock(page: PDFPage, f: Fonts, label: string, name: string, extra:
   return yy;
 }
 
+/** Bank details block, drawn from the invoice's snapshotted newline-separated text. */
+function payToBlock(page: PDFPage, f: Fonts, details: string, y: number): number {
+  draw(page, 'PAY TO', M, y, f.reg, 8, MUTED);
+  let yy = y - 14;
+  for (const line of details.split('\n')) {
+    if (!line.trim()) continue;
+    draw(page, line, M, yy, f.reg, 9, INK);
+    yy -= 12;
+  }
+  return yy;
+}
+
 // 9-column hours grid: Project label + 7 day columns + Total, right-aligned numerics.
 function drawDayGrid(page: PDFPage, f: Fonts, grid: WeekProjectDayGrid, startY: number): number {
   let y = startY;
@@ -152,9 +164,15 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   const leftBottom = partyBlock(page, f, 'Bill to', invoice.clientName, [invoice.clientEmail, invoice.clientAddress], y);
   draw(page, 'ISSUED', M, y, f.reg, 8, MUTED, RIGHT);
   draw(page, day(invoice.issuedAt, tz), M, y - 14, f.reg, 10, INK, RIGHT);
-  draw(page, 'STATUS', M, y - 32, f.reg, 8, MUTED, RIGHT);
-  draw(page, invoice.status.toUpperCase(), M, y - 46, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
-  const metaBottom = y - 46;
+  let metaY = y - 32;
+  if (invoice.dueAt) {
+    draw(page, 'DUE', M, metaY, f.reg, 8, MUTED, RIGHT);
+    draw(page, day(invoice.dueAt, tz), M, metaY - 14, f.reg, 10, INK, RIGHT);
+    metaY -= 32;
+  }
+  draw(page, 'STATUS', M, metaY, f.reg, 8, MUTED, RIGHT);
+  draw(page, invoice.status.toUpperCase(), M, metaY - 14, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
+  const metaBottom = metaY - 14;
 
   // Table
   y = Math.min(leftBottom, metaBottom) - 34;
@@ -177,8 +195,21 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
 
   // Total
   y -= 10;
+  if (invoice.taxAmount !== 0) {
+    draw(page, 'Subtotal', M, y, f.reg, 10, MUTED, COL_RATE);
+    draw(page, formatMoney(invoice.subtotal, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    y -= 16;
+    draw(page, `VAT ${invoice.taxRate}%`, M, y, f.reg, 10, MUTED, COL_RATE);
+    draw(page, formatMoney(invoice.taxAmount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    y -= 18;
+  }
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
   draw(page, formatMoney(invoice.total, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+
+  if (invoice.paymentDetails) {
+    y -= 34;
+    y = payToBlock(page, f, invoice.paymentDetails, y);
+  }
 
   // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
   if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
