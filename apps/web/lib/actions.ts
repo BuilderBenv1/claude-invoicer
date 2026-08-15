@@ -3,9 +3,17 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
-import { canDeleteClient, confirmationMatches, normalizeCurrency, normalizePath, round2, weekRange } from '@claude-invoicer/core';
+import {
+  canDeleteClient,
+  confirmationMatches,
+  DEFAULT_ACCOUNT_KEY,
+  normalizeCurrency,
+  normalizePath,
+  round2,
+  weekRange,
+} from '@claude-invoicer/core';
 import { getDb } from './db';
-import { clients, folderMappings, invoices, oneOffCharges, settings, weekAdjustments } from './db/schema';
+import { clients, folderMappings, invoices, oneOffCharges, paymentAccounts, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
 import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
@@ -564,4 +572,40 @@ export async function markPaidPublic(fd: FormData): Promise<void> {
   revalidatePath('/');
   revalidatePath('/invoices');
   revalidatePath('/invoices/' + inv.id);
+}
+
+// ---------------- Payment accounts ----------------
+
+/**
+ * Create or replace the bank details for one currency. `currency` is either an
+ * ISO code or 'DEFAULT' for the fallback used when a currency has no own row.
+ */
+export async function savePaymentAccount(fd: FormData): Promise<void> {
+  const raw = str(fd, 'currency');
+  if (!raw) throw new Error('Pick a currency for these details');
+  const currency = raw === DEFAULT_ACCOUNT_KEY ? DEFAULT_ACCOUNT_KEY : normalizeCurrency(raw);
+  const values = {
+    accountName: str(fd, 'accountName') || null,
+    bankName: str(fd, 'bankName') || null,
+    sortCode: str(fd, 'sortCode') || null,
+    accountNumber: str(fd, 'accountNumber') || null,
+    iban: str(fd, 'iban') || null,
+    bic: str(fd, 'bic') || null,
+    routingNumber: str(fd, 'routingNumber') || null,
+    notes: str(fd, 'notes') || null,
+  };
+  const db = getDb();
+  await db
+    .insert(paymentAccounts)
+    .values({ id: newId(), currency, ...values })
+    .onConflictDoUpdate({ target: paymentAccounts.currency, set: values });
+  revalidatePath('/settings');
+}
+
+export async function deletePaymentAccount(fd: FormData): Promise<void> {
+  const currency = str(fd, 'currency');
+  if (!currency) throw new Error('Missing currency');
+  const db = getDb();
+  await db.delete(paymentAccounts).where(eq(paymentAccounts.currency, currency));
+  revalidatePath('/settings');
 }

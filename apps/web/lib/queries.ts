@@ -28,12 +28,14 @@ import {
   invoiceLines,
   invoices,
   oneOffCharges,
+  paymentAccounts,
   receipts,
   weekAdjustments,
   type Client,
   type Invoice,
   type InvoiceLine,
   type OneOffCharge,
+  type PaymentAccountRow,
   type Settings,
   type WeekAdjustment,
 } from './db/schema';
@@ -395,6 +397,15 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
 export async function listClients(): Promise<Client[]> {
   const db = getDb();
   return db.select().from(clients).where(eq(clients.archived, 0)).orderBy(clients.name);
+}
+
+/** Bank details rows, default first, then by currency. */
+export async function listPaymentAccounts(): Promise<PaymentAccountRow[]> {
+  const db = getDb();
+  const rows = await db.select().from(paymentAccounts);
+  return rows.sort((a, b) =>
+    a.currency === 'DEFAULT' ? -1 : b.currency === 'DEFAULT' ? 1 : a.currency.localeCompare(b.currency),
+  );
 }
 
 export interface InvoiceListRow {

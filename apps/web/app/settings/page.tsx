@@ -1,11 +1,13 @@
 import { getSettings } from '@/lib/settings';
 import { updateSettings } from '@/lib/actions';
+import { listPaymentAccounts } from '@/lib/queries';
 import { CurrencySelect } from '@/components/currency-select';
+import { PaymentAccountsForm } from '@/components/payment-accounts-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const s = await getSettings();
+  const [s, accounts] = await Promise.all([getSettings(), listPaymentAccounts()]);
 
   return (
     <div className="space-y-6">
@@ -78,6 +80,18 @@ export default async function SettingsPage() {
           </button>
         </div>
       </form>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Payment details (printed on invoices)
+        </h2>
+        <p className="text-xs text-slate-500">
+          An invoice shows the details matching its currency, falling back to the default. Only the
+          fields you fill in are printed, and the details are copied onto each invoice as it is
+          issued — changing them later never alters an invoice you have already sent.
+        </p>
+        <PaymentAccountsForm accounts={accounts} />
+      </section>
     </div>
   );
 }
