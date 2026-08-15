@@ -28,6 +28,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             {invoice.clientName} · issued {formatDate(invoice.issuedAt, settings.timezone)}
             {invoice.notes ? ` · ${invoice.notes}` : ''}
           </p>
+          {invoice.vatNumber && <p className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</p>}
         </div>
         {paid ? (
           <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
@@ -72,7 +73,6 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                   <div className="text-xs font-normal text-slate-500">
                     Net {formatMoney(invoice.subtotal, invoice.currency)} · VAT {invoice.taxRate}%{' '}
                     {formatMoney(invoice.taxAmount, invoice.currency)}
-                    {invoice.vatNumber ? ` · VAT No: ${invoice.vatNumber}` : ''}
                   </div>
                 )}
                 {invoice.dueAt && (
