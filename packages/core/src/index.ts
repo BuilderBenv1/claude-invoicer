@@ -46,3 +46,4 @@ export {
   type CurrencyOption,
 } from './currency.js';
 export { toWinAnsi } from './text.js';
+export { canDeleteClient, confirmationMatches, type DeleteCheck } from './client-rules.js';
