@@ -178,7 +178,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   // Total
   y -= 10;
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
-  draw(page, formatMoney(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+  draw(page, formatMoney(invoice.total, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
 
   // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
   if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
@@ -222,7 +222,7 @@ export async function renderReceiptPdf(detail: InvoiceDetail): Promise<Uint8Arra
   const cy = y - 120;
   const lbl = 'AMOUNT PAID';
   drawCentered(page, lbl, cy + 44, f.reg, 8, MUTED);
-  const amt = formatMoney(invoice.subtotal, invoice.currency);
+  const amt = formatMoney(invoice.total, invoice.currency);
   drawCentered(page, amt, cy + 14, f.bold, 30);
   const paid = 'PAID IN FULL';
   drawCentered(page, paid, cy - 8, f.bold, 13, GREEN);

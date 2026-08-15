@@ -41,7 +41,7 @@ function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: s
 <p>Here is invoice <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}.</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">${rows}
 <tr><td style="padding:10px 0;font-weight:600">Total due</td>
-<td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.subtotal, invoice.currency)}</td></tr></table>
+<td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.total, invoice.currency)}</td></tr></table>
 <p style="margin:24px 0">
   <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">View &amp; pay invoice</a>
 </p>
@@ -53,7 +53,7 @@ function receiptHtml(invoice: Invoice, receiptNumber: string | null, tz: string)
   const body = `
 <p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
 <p>Thanks — we've recorded invoice <strong>${escapeHtml(invoice.number)}</strong> as paid${invoice.paidAt ? ` on ${formatDate(invoice.paidAt, tz)}` : ''}.</p>
-<p>Your receipt${receiptNumber ? ` <strong>${escapeHtml(receiptNumber)}</strong>` : ''} for ${formatMoney(invoice.subtotal, invoice.currency)} is attached.</p>`;
+<p>Your receipt${receiptNumber ? ` <strong>${escapeHtml(receiptNumber)}</strong>` : ''} for ${formatMoney(invoice.total, invoice.currency)} is attached.</p>`;
   return shell(`<h2 style="margin:0 0 8px">Receipt ${receiptNumber ? escapeHtml(receiptNumber) : ''}</h2>`, body);
 }
 

@@ -3,6 +3,7 @@ import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
+import { isOverdue } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,12 +59,35 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
             <tr className="border-t border-slate-700">
               <td className="pt-3 font-semibold">Total due</td>
               <td className="pt-3 text-right text-lg font-semibold">
-                {formatMoney(invoice.subtotal, invoice.currency)}
+                {formatMoney(invoice.total, invoice.currency)}
+                {invoice.taxAmount > 0 && (
+                  <div className="text-xs font-normal text-slate-500">
+                    Net {formatMoney(invoice.subtotal, invoice.currency)} · VAT {invoice.taxRate}%{' '}
+                    {formatMoney(invoice.taxAmount, invoice.currency)}
+                  </div>
+                )}
+                {invoice.dueAt && (
+                  <div
+                    className={`text-xs font-normal ${isOverdue(invoice.status, invoice.dueAt, Date.now()) ? 'text-red-300' : 'text-slate-500'}`}
+                  >
+                    Due {formatDate(invoice.dueAt, settings.timezone)}
+                    {isOverdue(invoice.status, invoice.dueAt, Date.now()) ? ' — overdue' : ''}
+                  </div>
+                )}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
+
+      {invoice.paymentDetails && (
+        <section className="card space-y-1">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
+          {invoice.paymentDetails.split('\n').map((line, i) => (
+            <div key={i} className="text-sm text-slate-300">{line}</div>
+          ))}
+        </section>
+      )}
 
       {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
