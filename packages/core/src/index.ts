@@ -47,3 +47,9 @@ export {
 } from './currency.js';
 export { toWinAnsi } from './text.js';
 export { canDeleteClient, confirmationMatches, type DeleteCheck } from './client-rules.js';
+export {
+  computeTotals,
+  dueDateFrom,
+  isOverdue,
+  type InvoiceTotals,
+} from './invoicing.js';
