@@ -3,7 +3,7 @@ import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue } from '@claude-invoicer/core';
+import { isOverdue, canBePaid, docLabel, docLegalLine, type DocType } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,11 +14,16 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
+  const isQuote = invoice.docType === 'quote';
+  const legalLine = docLegalLine(invoice.docType as DocType);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="flex items-start justify-between">
         <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {docLabel(invoice.docType as DocType)}
+          </div>
           <div className="text-lg font-semibold">{invoice.businessName || 'Invoice'}</div>
           <div className="text-sm text-slate-400">
             {invoice.number} · issued {formatDate(invoice.issuedAt, settings.timezone)}
@@ -66,7 +71,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
                     {formatMoney(invoice.taxAmount, invoice.currency)}
                   </div>
                 )}
-                {invoice.dueAt && (
+                {invoice.dueAt && !isQuote && (
                   <div className={`text-xs font-normal ${overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
                     {overdue ? ' — overdue' : ''}
@@ -78,7 +83,11 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
         </table>
       </div>
 
-      {invoice.paymentDetails && (
+      {legalLine && (
+        <div className="card border border-amber-900/40 bg-amber-950/20 text-sm text-amber-200">{legalLine}</div>
+      )}
+
+      {invoice.paymentDetails && !isQuote && (
         <section className="card space-y-1">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
           {invoice.paymentDetails.split('\n').map((line, i) => (
@@ -93,18 +102,18 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
         <a className="btn-ghost" href={`/i/${token}/pdf`} target="_blank" rel="noreferrer">
           Download invoice PDF
         </a>
-        {!paid ? (
+        {!paid && canBePaid(invoice.docType) ? (
           <form action={markPaidPublic}>
             <input type="hidden" name="token" value={token} />
             <button className="btn-primary" type="submit">
               Mark as paid
             </button>
           </form>
-        ) : (
+        ) : paid ? (
           <a className="btn-ghost" href={`/i/${token}/receipt`} target="_blank" rel="noreferrer">
             Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
           </a>
-        )}
+        ) : null}
       </div>
 
       {paid && invoice.paidAt && (

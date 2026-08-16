@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
-import { markInvoicePaid, deleteInvoice, emailInvoice } from '@/lib/actions';
+import { markInvoicePaid, deleteInvoice, emailInvoice, convertDocument } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue } from '@claude-invoicer/core';
+import { isOverdue, isBillingEvidence, docLabel, docLegalLine, type DocType } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +15,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
+  const billable = isBillingEvidence(invoice.docType);
+  const legalLine = docLegalLine(invoice.docType as DocType);
 
   return (
     <div className="space-y-8">
@@ -23,12 +25,31 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <Link href="/invoices" className="text-xs text-slate-500 hover:underline">
             ← Invoices
           </Link>
-          <h1 className="text-2xl font-semibold">{invoice.number}</h1>
+          <h1 className="text-2xl font-semibold">
+            {invoice.number}{' '}
+            <span className="text-base font-normal text-slate-400">{docLabel(invoice.docType as DocType)}</span>
+          </h1>
           <p className="text-sm text-slate-400">
             {invoice.clientName} · issued {formatDate(invoice.issuedAt, settings.timezone)}
             {invoice.notes ? ` · ${invoice.notes}` : ''}
           </p>
           {invoice.vatNumber && <p className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</p>}
+          {invoice.convertedToId && (
+            <p className="text-xs text-slate-500">
+              Converted to{' '}
+              <Link href={`/invoices/${invoice.convertedToId}`} className="underline">
+                the resulting invoice
+              </Link>
+            </p>
+          )}
+          {invoice.convertedFromId && (
+            <p className="text-xs text-slate-500">
+              Converted from{' '}
+              <Link href={`/invoices/${invoice.convertedFromId}`} className="underline">
+                its source document
+              </Link>
+            </p>
+          )}
         </div>
         {paid ? (
           <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
@@ -87,6 +108,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         </table>
       </div>
 
+      {legalLine && <p className="text-xs text-slate-500">{legalLine}</p>}
+
       {invoice.paymentDetails && (
         <section className="card space-y-1">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
@@ -98,48 +121,61 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
-      <div className="card space-y-2">
-        <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
-          <input type="hidden" name="invoiceId" value={invoice.id} />
-          <div className="flex-1 min-w-[16rem]">
-            <label className="label">Client email</label>
-            <input
-              name="to"
-              type="email"
-              defaultValue={invoice.emailedTo ?? invoice.clientEmail ?? ''}
-              placeholder="client@example.com"
-              className="input"
-            />
-          </div>
-          <button className="btn-primary" type="submit">
-            {invoice.emailedAt ? 'Re-send email' : 'Email to client'}
-          </button>
-        </form>
-        {invoice.emailedAt && (
-          <p className="text-xs text-slate-500">
-            Emailed {formatDate(invoice.emailedAt, settings.timezone)}
-            {invoice.emailedTo ? ` to ${invoice.emailedTo}` : ''}. Public link:{' '}
-            <code className="text-slate-400">/i/{invoice.publicToken}</code>
-          </p>
-        )}
-      </div>
+      {billable && (
+        <div className="card space-y-2">
+          <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="invoiceId" value={invoice.id} />
+            <div className="flex-1 min-w-[16rem]">
+              <label className="label">Client email</label>
+              <input
+                name="to"
+                type="email"
+                defaultValue={invoice.emailedTo ?? invoice.clientEmail ?? ''}
+                placeholder="client@example.com"
+                className="input"
+              />
+            </div>
+            <button className="btn-primary" type="submit">
+              {invoice.emailedAt ? 'Re-send email' : 'Email to client'}
+            </button>
+          </form>
+          {invoice.emailedAt && (
+            <p className="text-xs text-slate-500">
+              Emailed {formatDate(invoice.emailedAt, settings.timezone)}
+              {invoice.emailedTo ? ` to ${invoice.emailedTo}` : ''}. Public link:{' '}
+              <code className="text-slate-400">/i/{invoice.publicToken}</code>
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">
           Download invoice PDF
         </a>
 
-        {!paid ? (
-          <form action={markInvoicePaid}>
-            <input type="hidden" name="invoiceId" value={invoice.id} />
-            <button className="btn-primary" type="submit">
-              Mark paid &amp; issue receipt
-            </button>
-          </form>
+        {billable ? (
+          !paid ? (
+            <form action={markInvoicePaid}>
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <button className="btn-primary" type="submit">
+                Mark paid &amp; issue receipt
+              </button>
+            </form>
+          ) : (
+            <a className="btn-ghost" href={`/api/invoices/${invoice.id}/receipt`} target="_blank" rel="noreferrer">
+              Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
+            </a>
+          )
         ) : (
-          <a className="btn-ghost" href={`/api/invoices/${invoice.id}/receipt`} target="_blank" rel="noreferrer">
-            Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
-          </a>
+          !invoice.convertedToId && (
+            <form action={convertDocument}>
+              <input type="hidden" name="id" value={invoice.id} />
+              <button className="btn-primary" type="submit">
+                Convert to invoice
+              </button>
+            </form>
+          )
         )}
 
         <form action={deleteInvoice} className="ml-auto">
