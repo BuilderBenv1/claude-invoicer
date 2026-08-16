@@ -5,6 +5,7 @@ import {
   buildInvoiceLines,
   intervalsForClient,
   invoiceSubtotal,
+  isBillingEvidence,
   normalizePath,
   round2,
   unassignedFolders,
@@ -102,7 +103,9 @@ async function loadAll() {
 function billedWeekStarts(invoiceRows: Invoice[], clientId: string): Set<number> {
   const set = new Set<number>();
   for (const inv of invoiceRows) {
-    if (inv.clientId === clientId) set.add(inv.prevBilledThroughMs);
+    // A quote or pro forma for a client must never mark their week billed —
+    // the real work would then never be invoiced.
+    if (inv.clientId === clientId && isBillingEvidence(inv.docType)) set.add(inv.prevBilledThroughMs);
   }
   return set;
 }
@@ -119,9 +122,12 @@ function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharg
   return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
 }
 
-/** Count of invoices billed to a client. Phase B will add `&& inv.docType === 'invoice'` here. */
+/**
+ * How many real invoices a client has. Quotes and pro formas do not count —
+ * a client you only ever quoted has no billing history worth protecting.
+ */
 function invoiceCountFor(invoiceRows: Invoice[], clientId: string): number {
-  return invoiceRows.filter((inv) => inv.clientId === clientId).length;
+  return invoiceRows.filter((inv) => inv.clientId === clientId && isBillingEvidence(inv.docType)).length;
 }
 function sumAmounts(items: { amount: number }[]): number {
   return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
@@ -365,7 +371,9 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   const groups = [...groupMap.values()].sort((a, b) => b.activeMs - a.activeMs);
   for (const g of groups) g.sessions.sort((a, b) => a.startMs - b.startMs);
 
-  const invoice = invoiceRows.find((inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs);
+  const invoice = invoiceRows.find(
+    (inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs && isBillingEvidence(inv.docType),
+  );
 
   const [adjRow] = await db
     .select()

@@ -182,7 +182,13 @@ export async function issueWeekInvoice(
     const existing = await tx
       .select()
       .from(invoices)
-      .where(and(eq(invoices.clientId, clientId), eq(invoices.prevBilledThroughMs, startMs)));
+      .where(
+        and(
+          eq(invoices.clientId, clientId),
+          eq(invoices.prevBilledThroughMs, startMs),
+          eq(invoices.docType, 'invoice'),
+        ),
+      );
     if (existing[0]) return { ok: false, reason: 'already-invoiced', number: existing[0].number };
 
     const rawMappings = await tx.select().from(folderMappings);
