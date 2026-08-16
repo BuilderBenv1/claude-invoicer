@@ -19,7 +19,7 @@ export default async function NewInvoicePage() {
         <Link href="/invoices" className="text-xs text-slate-500 hover:underline">
           ← Invoices
         </Link>
-        <h1 className="text-2xl font-semibold">New invoice</h1>
+        <h1 className="text-2xl font-semibold">New document</h1>
         <p className="text-sm text-slate-400">
           Enter line items by hand — for older work or anything not tracked from a Claude session.
         </p>

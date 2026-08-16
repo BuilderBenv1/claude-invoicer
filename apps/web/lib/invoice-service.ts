@@ -317,7 +317,7 @@ export async function markPaidTx(tx: Tx, invoiceId: string, paidAt: Date = new D
     .set({ receiptSeq: sql`${settings.receiptSeq} + 1` })
     .where(eq(settings.id, 1))
     .returning({ seq: settings.receiptSeq });
-  const number = `RCPT-${String((row?.seq ?? 1)).padStart(4, '0')}`;
+  const number = formatDocNumber('RCPT', row?.seq ?? 1);
   await tx.update(invoices).set({ status: 'paid', paidAt }).where(eq(invoices.id, invoiceId));
   await tx.insert(receipts).values({ id: newId(), invoiceId, number });
   return number;

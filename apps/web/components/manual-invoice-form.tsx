@@ -29,6 +29,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
   const [rows, setRows] = useState<Row[]>([blankRow()]);
 
   const currency = clients.find((c) => c.id === clientId)?.currency ?? 'USD';
+  const legalLine = docLegalLine(docType);
 
   const computed = useMemo(
     () =>
@@ -75,7 +76,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
               </option>
             ))}
           </select>
-          {docLegalLine(docType) && <p className="mt-1 text-xs text-slate-500">{docLegalLine(docType)}</p>}
+          {legalLine && <p className="mt-1 text-xs text-slate-500">{legalLine}</p>}
         </div>
         <div>
           <label className="label">Client</label>
@@ -93,7 +94,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
           <input type="date" name="issuedAt" className="input" value={issuedAt} onChange={(e) => setIssuedAt(e.target.value)} />
         </div>
         <div>
-          <label className="label">Invoice # (optional override)</label>
+          <label className="label">{docLabel(docType)} # (optional override)</label>
           <input name="number" className="input" placeholder="auto" value={number} onChange={(e) => setNumber(e.target.value)} />
         </div>
       </div>

@@ -18,7 +18,11 @@ export default async function InvoicesPage({
 }: {
   searchParams: Promise<{ type?: string }>;
 }) {
-  const { type: typeParam } = await searchParams;
+  const { type: rawType } = await searchParams;
+  // An unrecognised value must fall back to "All" explicitly, rather than
+  // showing every document while leaving no filter link marked active.
+  const typeParam: DocType | undefined =
+    rawType === 'invoice' || rawType === 'proforma' || rawType === 'quote' ? rawType : undefined;
   const [invoices, settings, paymentAccounts] = await Promise.all([
     listInvoices(),
     getSettings(),
