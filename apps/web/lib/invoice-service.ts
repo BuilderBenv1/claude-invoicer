@@ -12,9 +12,11 @@ import {
   dueDateFrom,
   resolvePaymentAccount,
   renderPaymentBlock,
+  formatDocNumber,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
   type RoundMode,
+  type DocType,
 } from '@claude-invoicer/core';
 import { getDb, schema } from './db';
 import {
@@ -57,6 +59,10 @@ interface InsertInvoiceArgs {
   /** Custom number override; when absent, the next auto sequence is used. */
   number?: string;
   issuedAt?: Date;
+  /** Defaults to 'invoice'. Quotes and pro formas use their own sequences. */
+  docType?: DocType;
+  /** Set when this invoice was converted from a quote or pro forma. */
+  convertedFromId?: string;
 }
 
 /** Insert an invoice + its lines, assign number & public token, snapshot identity. */
@@ -64,17 +70,46 @@ export async function insertInvoice(
   tx: Tx,
   a: InsertInvoiceArgs,
 ): Promise<{ id: string; number: string; token: string }> {
+  const docType: DocType = a.docType ?? 'invoice';
   const id = newId();
   const token = newToken();
   let number = a.number ?? '';
   if (!number) {
-    const [row] = await tx
-      .update(settings)
-      .set({ invoiceSeq: sql`${settings.invoiceSeq} + 1` })
-      .where(eq(settings.id, 1))
-      .returning({ seq: settings.invoiceSeq });
-    if (!row) throw new Error('Settings not initialized');
-    number = `INV-${String(row.seq).padStart(4, '0')}`;
+    // Each type has its own sequence, so a quote never consumes an invoice
+    // number and the invoice run stays unbroken for the accounts. The three
+    // branches are written out rather than computed, so Drizzle can type the
+    // column reference in both the `set` and the `returning`.
+    let seq: number;
+    let prefix: string;
+    if (docType === 'quote') {
+      const [row] = await tx
+        .update(settings)
+        .set({ quoteSeq: sql`${settings.quoteSeq} + 1` })
+        .where(eq(settings.id, 1))
+        .returning({ seq: settings.quoteSeq });
+      if (!row) throw new Error('Settings not initialized');
+      seq = row.seq;
+      prefix = a.settings.quotePrefix;
+    } else if (docType === 'proforma') {
+      const [row] = await tx
+        .update(settings)
+        .set({ proformaSeq: sql`${settings.proformaSeq} + 1` })
+        .where(eq(settings.id, 1))
+        .returning({ seq: settings.proformaSeq });
+      if (!row) throw new Error('Settings not initialized');
+      seq = row.seq;
+      prefix = a.settings.proformaPrefix;
+    } else {
+      const [row] = await tx
+        .update(settings)
+        .set({ invoiceSeq: sql`${settings.invoiceSeq} + 1` })
+        .where(eq(settings.id, 1))
+        .returning({ seq: settings.invoiceSeq });
+      if (!row) throw new Error('Settings not initialized');
+      seq = row.seq;
+      prefix = a.settings.invoicePrefix;
+    }
+    number = formatDocNumber(prefix, seq);
   }
 
   const totals = computeTotals(a.subtotal, a.settings.vatRate);
@@ -114,6 +149,8 @@ export async function insertInvoice(
     clientEmail: a.client.email,
     clientAddress: a.client.address,
     issuedAt,
+    docType,
+    convertedFromId: a.convertedFromId ?? null,
   });
   await tx.insert(invoiceLines).values(a.lines.map((l) => ({ invoiceId: id, ...l })));
   return { id, number, token };
