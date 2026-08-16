@@ -17,6 +17,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
   const billable = isBillingEvidence(invoice.docType);
   const legalLine = docLegalLine(invoice.docType as DocType);
+  const isQuote = invoice.docType === 'quote';
 
   return (
     <div className="space-y-8">
@@ -51,13 +52,17 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </p>
           )}
         </div>
-        {paid ? (
-          <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
-        ) : overdue ? (
-          <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
-        ) : (
-          <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
-        )}
+        {billable ? (
+          paid ? (
+            <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
+          ) : overdue ? (
+            <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
+          ) : (
+            <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
+          )
+        ) : invoice.convertedToId ? (
+          <span className="rounded bg-slate-800 px-3 py-1 text-sm text-slate-400">converted</span>
+        ) : null}
       </header>
 
       <div className="card">
@@ -96,7 +101,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                     {formatMoney(invoice.taxAmount, invoice.currency)}
                   </div>
                 )}
-                {invoice.dueAt && (
+                {invoice.dueAt && !isQuote && (
                   <div className={`text-xs font-normal ${overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
                     {overdue ? ' — overdue' : ''}
@@ -121,33 +126,31 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
-      {billable && (
-        <div className="card space-y-2">
-          <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
-            <input type="hidden" name="invoiceId" value={invoice.id} />
-            <div className="flex-1 min-w-[16rem]">
-              <label className="label">Client email</label>
-              <input
-                name="to"
-                type="email"
-                defaultValue={invoice.emailedTo ?? invoice.clientEmail ?? ''}
-                placeholder="client@example.com"
-                className="input"
-              />
-            </div>
-            <button className="btn-primary" type="submit">
-              {invoice.emailedAt ? 'Re-send email' : 'Email to client'}
-            </button>
-          </form>
-          {invoice.emailedAt && (
-            <p className="text-xs text-slate-500">
-              Emailed {formatDate(invoice.emailedAt, settings.timezone)}
-              {invoice.emailedTo ? ` to ${invoice.emailedTo}` : ''}. Public link:{' '}
-              <code className="text-slate-400">/i/{invoice.publicToken}</code>
-            </p>
-          )}
-        </div>
-      )}
+      <div className="card space-y-2">
+        <form action={emailInvoice} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="invoiceId" value={invoice.id} />
+          <div className="flex-1 min-w-[16rem]">
+            <label className="label">Client email</label>
+            <input
+              name="to"
+              type="email"
+              defaultValue={invoice.emailedTo ?? invoice.clientEmail ?? ''}
+              placeholder="client@example.com"
+              className="input"
+            />
+          </div>
+          <button className="btn-primary" type="submit">
+            {invoice.emailedAt ? 'Re-send email' : 'Email to client'}
+          </button>
+        </form>
+        {invoice.emailedAt && (
+          <p className="text-xs text-slate-500">
+            Emailed {formatDate(invoice.emailedAt, settings.timezone)}
+            {invoice.emailedTo ? ` to ${invoice.emailedTo}` : ''}. Public link:{' '}
+            <code className="text-slate-400">/i/{invoice.publicToken}</code>
+          </p>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">

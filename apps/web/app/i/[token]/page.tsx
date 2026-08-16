@@ -31,13 +31,17 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
           </div>
           {invoice.vatNumber && <div className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</div>}
         </div>
-        {paid ? (
-          <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
-        ) : overdue ? (
-          <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
-        ) : (
-          <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
-        )}
+        {canBePaid(invoice.docType) ? (
+          paid ? (
+            <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
+          ) : overdue ? (
+            <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
+          ) : (
+            <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
+          )
+        ) : invoice.convertedToId ? (
+          <span className="rounded bg-slate-800 px-3 py-1 text-sm text-slate-400">converted</span>
+        ) : null}
       </header>
 
       <div className="text-sm text-slate-400">
