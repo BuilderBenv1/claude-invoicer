@@ -20,6 +20,18 @@ import { clients, folderMappings, invoiceLines, invoices, oneOffCharges, payment
 import { getSettings } from './settings';
 import { newId } from './format';
 import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
+import { auth } from './auth';
+
+/**
+ * Server Actions are public HTTP endpoints dispatched by action id, not by
+ * route — the middleware's path matcher does not protect them. Every action
+ * that changes state calls this first. `markPaidPublic` is the deliberate
+ * exception: it is authorised by the unguessable invoice token instead.
+ */
+async function requireOwner(): Promise<void> {
+  const session = await auth();
+  if (!session?.user) throw new Error('Not signed in');
+}
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? '').trim();
@@ -52,6 +64,7 @@ function numOrNull(fd: FormData, key: string): number | null {
  * history.
  */
 export async function createClient(fd: FormData): Promise<void> {
+  await requireOwner();
   const name = str(fd, 'name');
   if (!name) throw new Error('Client name is required');
   const rawPath = str(fd, 'path');
@@ -94,6 +107,7 @@ export async function createClient(fd: FormData): Promise<void> {
 }
 
 export async function updateClient(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   if (!id) throw new Error('Missing client id');
   const round = int(fd, 'roundIncrementMin', -1);
@@ -114,6 +128,7 @@ export async function updateClient(fd: FormData): Promise<void> {
 }
 
 export async function archiveClient(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   const db = getDb();
   await db.update(clients).set({ archived: 1 }).where(eq(clients.id, id));
@@ -122,6 +137,7 @@ export async function archiveClient(fd: FormData): Promise<void> {
 }
 
 export async function unarchiveClient(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   if (!id) throw new Error('Missing client id');
   const db = getDb();
@@ -137,6 +153,7 @@ export async function unarchiveClient(fd: FormData): Promise<void> {
  * intervals are kept and their folders simply return to the unassigned pool.
  */
 export async function deleteClient(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   if (!id) throw new Error('Missing client id');
   const db = getDb();
@@ -175,6 +192,7 @@ export async function deleteClient(fd: FormData): Promise<void> {
  * ms (computed in the user's browser), 'clear' removes it.
  */
 export async function setFolderBillFrom(fd: FormData): Promise<void> {
+  await requireOwner();
   const mappingId = str(fd, 'mappingId');
   const clientId = str(fd, 'clientId');
   if (!mappingId) throw new Error('Missing folder id');
@@ -192,6 +210,7 @@ export async function setFolderBillFrom(fd: FormData): Promise<void> {
 // ---------------- Folder mappings ----------------
 
 export async function addMapping(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   const rawPath = str(fd, 'path');
   if (!clientId || !rawPath) throw new Error('Client and folder path are required');
@@ -216,6 +235,7 @@ export async function addMapping(fd: FormData): Promise<void> {
 
 /** Edit an existing folder mapping's label and per-folder rate. */
 export async function updateMapping(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   const clientId = str(fd, 'clientId');
   if (!id) throw new Error('Missing mapping id');
@@ -229,6 +249,7 @@ export async function updateMapping(fd: FormData): Promise<void> {
 }
 
 export async function removeMapping(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   const clientId = str(fd, 'clientId');
   const db = getDb();
@@ -240,6 +261,7 @@ export async function removeMapping(fd: FormData): Promise<void> {
 // ---------------- One-off charges ----------------
 
 export async function addOneOff(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   const description = str(fd, 'description');
   const amount = num(fd, 'amount');
@@ -252,6 +274,7 @@ export async function addOneOff(fd: FormData): Promise<void> {
 }
 
 export async function removeOneOff(fd: FormData): Promise<void> {
+  await requireOwner();
   const id = str(fd, 'id');
   const clientId = str(fd, 'clientId');
   const db = getDb();
@@ -263,6 +286,7 @@ export async function removeOneOff(fd: FormData): Promise<void> {
 
 /** Assign an unmapped folder to an existing client, or create a client on the fly. */
 export async function assignFolder(fd: FormData): Promise<void> {
+  await requireOwner();
   const rawPath = str(fd, 'path');
   if (!rawPath) throw new Error('Folder path required');
   const existingClientId = str(fd, 'clientId');
@@ -299,6 +323,7 @@ export async function assignFolder(fd: FormData): Promise<void> {
  * this on for the current week).
  */
 export async function issueInvoice(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   const weekStart = str(fd, 'weekStart');
   const includeOneOffs = str(fd, 'includeOneOffs') === '1';
@@ -343,6 +368,7 @@ interface ManualLineInput {
  * its week-window fields are set to -1 (never collides with a real week start).
  */
 export async function createManualInvoice(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   if (!clientId) throw new Error('Pick a client');
 
@@ -415,6 +441,7 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
  * directions. The source is kept — it is the record of what was quoted.
  */
 export async function convertDocument(fd: FormData): Promise<void> {
+  await requireOwner();
   const sourceId = str(fd, 'id');
   if (!sourceId) throw new Error('Missing document id');
   const db = getDb();
@@ -463,6 +490,7 @@ export async function convertDocument(fd: FormData): Promise<void> {
 }
 
 export async function markInvoicePaid(fd: FormData): Promise<void> {
+  await requireOwner();
   const invoiceId = str(fd, 'invoiceId');
   if (!invoiceId) throw new Error('Missing invoice id');
   const receiptNumber = await markPaidAndReceipt(invoiceId);
@@ -484,6 +512,7 @@ export async function markInvoicePaid(fd: FormData): Promise<void> {
  * to the unbilled pool.
  */
 export async function deleteInvoice(fd: FormData): Promise<void> {
+  await requireOwner();
   const invoiceId = str(fd, 'invoiceId');
   const db = getDb();
   await db.transaction(async (tx) => {
@@ -505,6 +534,7 @@ export async function deleteInvoice(fd: FormData): Promise<void> {
  * `set` overrides the stored value; otherwise `delta` is added to it. Zero clears it.
  */
 export async function adjustWeek(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   const weekStart = str(fd, 'weekStart');
   if (!clientId || !weekStart) throw new Error('Missing client or week');
@@ -544,6 +574,7 @@ export async function adjustWeek(fd: FormData): Promise<void> {
  * own — no tracked week required. Window fields are -1 (not a tracked week).
  */
 export async function billOneOffs(fd: FormData): Promise<void> {
+  await requireOwner();
   const clientId = str(fd, 'clientId');
   if (!clientId) throw new Error('Missing client id');
   const db = getDb();
@@ -591,6 +622,7 @@ export async function billOneOffs(fd: FormData): Promise<void> {
 // ---------------- Settings ----------------
 
 export async function updateSettings(fd: FormData): Promise<void> {
+  await requireOwner();
   const db = getDb();
   await getSettings(); // ensure row exists
   await db
@@ -620,6 +652,7 @@ export async function updateSettings(fd: FormData): Promise<void> {
 
 /** Manually email (or re-send) an invoice to the given / on-file recipient. */
 export async function emailInvoice(fd: FormData): Promise<void> {
+  await requireOwner();
   const invoiceId = str(fd, 'invoiceId');
   if (!invoiceId) throw new Error('Missing invoice id');
   const to = str(fd, 'to');
@@ -657,6 +690,7 @@ export async function markPaidPublic(fd: FormData): Promise<void> {
  * ISO code or 'DEFAULT' for the fallback used when a currency has no own row.
  */
 export async function savePaymentAccount(fd: FormData): Promise<void> {
+  await requireOwner();
   const raw = str(fd, 'currency');
   if (!raw) throw new Error('Pick a currency for these details');
   const currency = raw === DEFAULT_ACCOUNT_KEY ? DEFAULT_ACCOUNT_KEY : normalizeCurrency(raw);
@@ -682,6 +716,7 @@ export async function savePaymentAccount(fd: FormData): Promise<void> {
 }
 
 export async function deletePaymentAccount(fd: FormData): Promise<void> {
+  await requireOwner();
   const currency = str(fd, 'currency');
   if (!currency) throw new Error('Missing currency');
   const db = getDb();
