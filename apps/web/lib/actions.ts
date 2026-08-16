@@ -143,7 +143,13 @@ export async function deleteClient(fd: FormData): Promise<void> {
     const [client] = await tx.select().from(clients).where(eq(clients.id, id));
     if (!client) throw new Error('Client not found');
 
-    const clientInvoices = await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.clientId, id));
+    // Only real invoices are billing history worth protecting — a client you
+    // merely quoted has nothing to preserve. Matches invoiceCountFor, which
+    // decides whether the UI offers Delete at all.
+    const clientInvoices = await tx
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(and(eq(invoices.clientId, id), eq(invoices.docType, 'invoice')));
     const check = canDeleteClient(client.name, clientInvoices.length);
     if (!check.allowed) throw new Error(check.reason);
 
