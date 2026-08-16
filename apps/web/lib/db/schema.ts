@@ -89,6 +89,12 @@ export const invoices = pgTable('invoices', {
     .notNull()
     .references(() => clients.id),
   status: text('status').notNull().default('unpaid'), // 'unpaid' | 'paid'
+  /** 'invoice' | 'proforma' | 'quote'. Only 'invoice' is billing evidence. */
+  docType: text('doc_type').notNull().default('invoice'),
+  /** Set on a converted invoice, pointing at the quote or pro forma it came from. */
+  convertedFromId: text('converted_from_id'),
+  /** Set on a quote or pro forma once it has been converted. */
+  convertedToId: text('converted_to_id'),
   currency: text('currency').notNull(),
   subtotal: doublePrecision('subtotal').notNull(),
   /** Billing window: (prevBilledThroughMs, cutoffMs]. */
@@ -163,6 +169,11 @@ export const settings = pgTable('settings', {
   timezone: text('timezone').notNull().default('UTC'),
   invoiceSeq: integer('invoice_seq').notNull().default(0),
   receiptSeq: integer('receipt_seq').notNull().default(0),
+  quoteSeq: integer('quote_seq').notNull().default(0),
+  proformaSeq: integer('proforma_seq').notNull().default(0),
+  invoicePrefix: text('invoice_prefix').notNull().default('INV'),
+  quotePrefix: text('quote_prefix').notNull().default('QUO'),
+  proformaPrefix: text('proforma_prefix').notNull().default('PF'),
   autoSendWeekly: integer('auto_send_weekly').notNull().default(0),
   /** Default payment terms for new invoices, in days. */
   paymentTermsDays: integer('payment_terms_days').notNull().default(14),
