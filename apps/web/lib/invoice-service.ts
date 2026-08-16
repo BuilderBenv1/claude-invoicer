@@ -64,6 +64,12 @@ interface InsertInvoiceArgs {
   docType?: DocType;
   /** Set when this invoice was converted from a quote or pro forma. */
   convertedFromId?: string;
+  /**
+   * Defaults to `client.currency`. Pass explicitly on a conversion so the
+   * new invoice honours the currency the source was quoted in, even if the
+   * client's own currency has since changed.
+   */
+  currency?: string;
 }
 
 /** Insert an invoice + its lines, assign number & public token, snapshot identity. */
@@ -116,11 +122,17 @@ export async function insertInvoice(
   const totals = computeTotals(a.subtotal, a.settings.vatRate);
   const issuedAt = a.issuedAt ?? new Date();
   const termsDays = a.settings.paymentTermsDays;
-  const dueAt = dueDateFrom(issuedAt, termsDays, a.settings.timezone);
+  // Spec B4: a quote is not a request for payment and stores no due date —
+  // storing one would plant a landmine for an overdue-totals query that
+  // filters on `dueAt < now`.
+  const dueAt = docType === 'quote' ? null : dueDateFrom(issuedAt, termsDays, a.settings.timezone);
+  // Defaults to the client's own currency; a conversion passes the source's
+  // currency instead, since the source is the record of what was quoted.
+  const currency = a.currency ?? a.client.currency;
 
   const accounts = await tx.select().from(paymentAccounts);
   const paymentDetails = renderPaymentBlock(
-    resolvePaymentAccount(accounts, a.client.currency),
+    resolvePaymentAccount(accounts, currency),
     number,
   );
 
@@ -129,7 +141,7 @@ export async function insertInvoice(
     number,
     clientId: a.client.id,
     status: 'unpaid',
-    currency: a.client.currency,
+    currency,
     subtotal: totals.subtotal,
     taxRate: totals.taxRate,
     taxAmount: totals.taxAmount,

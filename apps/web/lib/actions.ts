@@ -12,6 +12,7 @@ import {
   isKnownCurrency,
   normalizeCurrency,
   normalizePath,
+  prefixesAreDistinct,
   round2,
   weekRange,
 } from '@claude-invoicer/core';
@@ -470,22 +471,31 @@ export async function convertDocument(fd: FormData): Promise<void> {
     if (client.archived) throw new Error('This client is archived. Restore them before invoicing.');
 
     const sourceLines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, sourceId));
+    const newLines = sourceLines.map((l) => ({
+      label: l.label,
+      hours: l.hours,
+      ratePerHour: l.ratePerHour,
+      amount: l.amount,
+    }));
+    // Recomputed from the rows actually being inserted rather than trusted
+    // from source.subtotal — they should always agree, but recomputing here
+    // removes a class of silent drift.
+    const subtotal = round2(newLines.reduce((sum, l) => sum + l.amount, 0));
 
     const { id } = await insertInvoice(tx, {
       client,
       settings: s,
-      lines: sourceLines.map((l) => ({
-        label: l.label,
-        hours: l.hours,
-        ratePerHour: l.ratePerHour,
-        amount: l.amount,
-      })),
-      subtotal: source.subtotal,
+      lines: newLines,
+      subtotal,
       prevBilledThroughMs: -1,
       cutoffMs: -1,
       notes: `Converted from ${source.number}`,
       docType: 'invoice',
       convertedFromId: source.id,
+      // The source is the record of what was quoted — if the client's currency
+      // changed since, the invoice must still honour the quoted currency rather
+      // than silently re-denominating the same line amounts.
+      currency: source.currency,
     });
 
     await tx.update(invoices).set({ convertedToId: id }).where(eq(invoices.id, sourceId));
@@ -651,6 +661,17 @@ export async function updateSettings(fd: FormData): Promise<void> {
   await requireOwner();
   const db = getDb();
   await getSettings(); // ensure row exists
+
+  const invoicePrefix = str(fd, 'invoicePrefix') || 'INV';
+  const quotePrefix = str(fd, 'quotePrefix') || 'QUO';
+  const proformaPrefix = str(fd, 'proformaPrefix') || 'PF';
+  // Sharing a prefix across types would either collide numbers or silently
+  // interleave a quote/pro forma into the invoice sequence, defeating the
+  // unbroken-run guarantee the per-type sequences exist to provide.
+  if (!prefixesAreDistinct(invoicePrefix, quotePrefix, proformaPrefix)) {
+    throw new Error('Invoice, quote and pro forma prefixes must all be different.');
+  }
+
   await db
     .update(settings)
     .set({
@@ -667,9 +688,9 @@ export async function updateSettings(fd: FormData): Promise<void> {
       paymentTermsDays: int(fd, 'paymentTermsDays', 14),
       vatRate: num(fd, 'vatRate', 0),
       vatNumber: str(fd, 'vatNumber') || null,
-      invoicePrefix: str(fd, 'invoicePrefix') || 'INV',
-      quotePrefix: str(fd, 'quotePrefix') || 'QUO',
-      proformaPrefix: str(fd, 'proformaPrefix') || 'PF',
+      invoicePrefix,
+      quotePrefix,
+      proformaPrefix,
     })
     .where(eq(settings.id, 1));
   revalidatePath('/');

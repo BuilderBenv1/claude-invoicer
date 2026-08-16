@@ -72,7 +72,8 @@ export default async function SettingsPage() {
           <input name="proformaPrefix" defaultValue={s.proformaPrefix} className="input" />
           <p className="mt-1 text-xs text-slate-500">
             Changing a prefix affects only documents issued from now on — numbers already issued keep
-            the prefix they were given.
+            the prefix they were given. The three prefixes must all be different, or numbers from one
+            type could collide with another's.
           </p>
         </div>
 
