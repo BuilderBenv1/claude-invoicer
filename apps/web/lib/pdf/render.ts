@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import { docTitle, docLegalLine, formatMoney, toWinAnsi, type DocType, type WeekProjectDayGrid } from '@claude-invoicer/core';
+import { docTitle, docLegalLine, formatMoney, toWinAnsi, type WeekProjectDayGrid } from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -166,7 +166,7 @@ const DESC_MAX = COL_HOURS - (M + 8) - 40;
 export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Array> {
   const { invoice, lines, settings } = detail;
   const tz = settings.timezone;
-  const docType = invoice.docType as DocType;
+  const docType = invoice.docType;
   const isQuote = docType === 'quote';
   const doc = await PDFDocument.create();
   let page = doc.addPage([W, H]);

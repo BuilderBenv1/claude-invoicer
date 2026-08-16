@@ -3,7 +3,7 @@ import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue, canBePaid, docLabel, docLegalLine, type DocType } from '@claude-invoicer/core';
+import { isOverdue, canBePaid, docLabel, docLegalLine } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,14 +15,14 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   const paid = invoice.status === 'paid';
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
   const isQuote = invoice.docType === 'quote';
-  const legalLine = docLegalLine(invoice.docType as DocType);
+  const legalLine = docLegalLine(invoice.docType);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="flex items-start justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {docLabel(invoice.docType as DocType)}
+            {docLabel(invoice.docType)}
           </div>
           <div className="text-lg font-semibold">{invoice.businessName || 'Invoice'}</div>
           <div className="text-sm text-slate-400">

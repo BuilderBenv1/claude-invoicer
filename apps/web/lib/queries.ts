@@ -2,8 +2,10 @@ import { and, desc, eq } from 'drizzle-orm';
 import {
   aggregateIntervals,
   adjustmentLine,
+  billedWeekStarts,
   buildInvoiceLines,
   intervalsForClient,
+  invoiceCountFor,
   invoiceSubtotal,
   isBillingEvidence,
   normalizePath,
@@ -95,21 +97,6 @@ async function loadAll() {
   };
 }
 
-/**
- * Set of already-invoiced week-start ms for a client. A week invoice records its
- * window start in `prevBilledThroughMs`, so a week is "billed" if any invoice for
- * that client starts at that week's start.
- */
-function billedWeekStarts(invoiceRows: Invoice[], clientId: string): Set<number> {
-  const set = new Set<number>();
-  for (const inv of invoiceRows) {
-    // A quote or pro forma for a client must never mark their week billed —
-    // the real work would then never be invoiced.
-    if (inv.clientId === clientId && isBillingEvidence(inv.docType)) set.add(inv.prevBilledThroughMs);
-  }
-  return set;
-}
-
 /** Per-week signed hours adjustment for a client, keyed by week-start ms. */
 function adjustmentsFor(rows: WeekAdjustment[], clientId: string): Map<number, number> {
   const m = new Map<number, number>();
@@ -122,13 +109,6 @@ function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharg
   return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
 }
 
-/**
- * How many real invoices a client has. Quotes and pro formas do not count —
- * a client you only ever quoted has no billing history worth protecting.
- */
-function invoiceCountFor(invoiceRows: Invoice[], clientId: string): number {
-  return invoiceRows.filter((inv) => inv.clientId === clientId && isBillingEvidence(inv.docType)).length;
-}
 function sumAmounts(items: { amount: number }[]): number {
   return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 }

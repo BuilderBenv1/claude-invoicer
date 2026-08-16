@@ -98,7 +98,7 @@ export default async function InvoicesPage({
                     </td>
                     <td className="py-2">{inv.clientName}</td>
                     <td className={`py-2 ${billable ? '' : 'text-slate-500'}`}>
-                      {docLabel(inv.docType as DocType)}
+                      {docLabel(inv.docType)}
                     </td>
                     <td className="py-2 text-slate-400">{formatDate(inv.issuedAt, settings.timezone)}</td>
                     <td className="py-2 text-right">{formatMoney(inv.total, inv.currency)}</td>

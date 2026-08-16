@@ -8,6 +8,9 @@ import {
   formatDocNumber,
   isBillingEvidence,
   isDocType,
+  isRequestForPayment,
+  prefixesAreDistinct,
+  totalLabel,
 } from '../src/documents.js';
 
 describe('DOC_TYPES', () => {
@@ -40,6 +43,11 @@ describe('docLabel and docTitle', () => {
     expect(docTitle('proforma')).toBe('PRO FORMA INVOICE');
     expect(docTitle('quote')).toBe('QUOTE');
   });
+  it('labels an unrecognised or empty type as an invoice rather than rendering blank', () => {
+    expect(docLabel('')).toBe('Invoice');
+    expect(docLabel('something-new')).toBe('Invoice');
+    expect(docTitle('something-new')).toBe('INVOICE');
+  });
 });
 
 describe('docLegalLine', () => {
@@ -53,6 +61,10 @@ describe('docLegalLine', () => {
   });
   it('states a quote is not a request for payment', () => {
     expect(docLegalLine('quote')).toBe('This is a quotation, not a request for payment.');
+  });
+  it('says nothing extra on an unrecognised type, matching the invoice treatment', () => {
+    expect(docLegalLine('something-new')).toBeNull();
+    expect(docLegalLine('')).toBeNull();
   });
 });
 
@@ -90,5 +102,41 @@ describe('formatDocNumber', () => {
   it('trims a prefix and falls back when it is blank', () => {
     expect(formatDocNumber('  PF  ', 3)).toBe('PF-0003');
     expect(formatDocNumber('', 3)).toBe('DOC-0003');
+  });
+});
+
+describe('totalLabel', () => {
+  it('names the payable-amount label per type', () => {
+    expect(totalLabel('invoice')).toBe('Total due');
+    expect(totalLabel('proforma')).toBe('Total payable');
+    expect(totalLabel('quote')).toBe('Quoted total');
+  });
+  it('falls back to "Total due" for an unrecognised type, matching isBillingEvidence', () => {
+    expect(totalLabel('')).toBe('Total due');
+    expect(totalLabel('something-new')).toBe('Total due');
+  });
+});
+
+describe('isRequestForPayment', () => {
+  it('is false only for a quote', () => {
+    expect(isRequestForPayment('invoice')).toBe(true);
+    expect(isRequestForPayment('proforma')).toBe(true);
+    expect(isRequestForPayment('quote')).toBe(false);
+  });
+  it('treats an unknown or empty type as a request for payment', () => {
+    expect(isRequestForPayment('')).toBe(true);
+    expect(isRequestForPayment('something-new')).toBe(true);
+  });
+});
+
+describe('prefixesAreDistinct', () => {
+  it('is true when all three differ', () => {
+    expect(prefixesAreDistinct('INV', 'QUO', 'PF')).toBe(true);
+  });
+  it('is false when any two coincide, case-insensitively and ignoring surrounding whitespace', () => {
+    expect(prefixesAreDistinct('INV', 'INV', 'PF')).toBe(false);
+    expect(prefixesAreDistinct('INV', 'QUO', 'inv')).toBe(false);
+    expect(prefixesAreDistinct('INV', ' inv ', 'PF')).toBe(false);
+    expect(prefixesAreDistinct('INV', 'QUO', 'quo')).toBe(false);
   });
 });

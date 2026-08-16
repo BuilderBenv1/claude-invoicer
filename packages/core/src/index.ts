@@ -67,6 +67,14 @@ export {
   docLegalLine,
   isBillingEvidence,
   canBePaid,
+  totalLabel,
+  isRequestForPayment,
+  prefixesAreDistinct,
   formatDocNumber,
   type DocType,
 } from './documents.js';
+export {
+  billedWeekStarts,
+  invoiceCountFor,
+  type BillingEvidenceRow,
+} from './billing-evidence.js';

@@ -4,7 +4,7 @@ import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markInvoicePaid, deleteInvoice, emailInvoice, convertDocument } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue, isBillingEvidence, docLabel, docLegalLine, type DocType } from '@claude-invoicer/core';
+import { isOverdue, isBillingEvidence, docLabel, docLegalLine } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const paid = invoice.status === 'paid';
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
   const billable = isBillingEvidence(invoice.docType);
-  const legalLine = docLegalLine(invoice.docType as DocType);
+  const legalLine = docLegalLine(invoice.docType);
   const isQuote = invoice.docType === 'quote';
 
   return (
@@ -28,7 +28,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           </Link>
           <h1 className="text-2xl font-semibold">
             {invoice.number}{' '}
-            <span className="text-base font-normal text-slate-400">{docLabel(invoice.docType as DocType)}</span>
+            <span className="text-base font-normal text-slate-400">{docLabel(invoice.docType)}</span>
           </h1>
           <p className="text-sm text-slate-400">
             {invoice.clientName} · issued {formatDate(invoice.issuedAt, settings.timezone)}

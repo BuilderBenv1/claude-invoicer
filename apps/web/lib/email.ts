@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 import type { InvoiceDetail } from './queries';
 import { renderInvoicePdf, renderReceiptPdf } from './pdf/render';
 import { formatMoney, formatDate } from './format';
-import { docLabel, type DocType } from '@claude-invoicer/core';
+import { docLabel } from '@claude-invoicer/core';
 import type { Invoice, InvoiceLine } from './db/schema';
 
 function escapeHtml(s: string): string {
@@ -30,7 +30,7 @@ ${title}${bodyRows}
 }
 
 function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: string): string {
-  const docType = invoice.docType as DocType;
+  const docType = invoice.docType;
   const isQuote = docType === 'quote';
   const label = docLabel(docType);
   const rows = lines
@@ -72,7 +72,7 @@ export async function sendInvoiceEmail(detail: InvoiceDetail, to: string): Promi
   const { error } = await client().emails.send({
     from: fromAddress(),
     to,
-    subject: `${docLabel(invoice.docType as DocType)} ${invoice.number} from ${invoice.businessName || 'your contractor'}`,
+    subject: `${docLabel(invoice.docType)} ${invoice.number} from ${invoice.businessName || 'your contractor'}`,
     html: invoiceHtml(invoice, lines, link, settings.timezone),
     attachments: [{ filename: `${invoice.number}.pdf`, content: Buffer.from(pdf) }],
   });
