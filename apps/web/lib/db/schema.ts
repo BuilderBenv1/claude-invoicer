@@ -129,6 +129,7 @@ export const invoices = pgTable('invoices', {
   clientWeekUnique: uniqueIndex('invoices_client_week_unique')
     .on(t.clientId, t.prevBilledThroughMs)
     .where(sql`${t.prevBilledThroughMs} >= 0`),
+  numberUnique: uniqueIndex('invoices_number_unique').on(t.number),
 }));
 
 export const invoiceLines = pgTable(
