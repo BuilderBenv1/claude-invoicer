@@ -13,6 +13,7 @@ import {
   resolvePaymentAccount,
   renderPaymentBlock,
   formatDocNumber,
+  canBePaid,
   type ActivityInterval as CoreInterval,
   type FolderMapping as CoreMapping,
   type RoundMode,
@@ -270,6 +271,9 @@ export async function issueWeekInvoice(
 export async function markPaidTx(tx: Tx, invoiceId: string, paidAt: Date = new Date()): Promise<string | null> {
   const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
   if (!inv) throw new Error('Invoice not found');
+  if (!canBePaid(inv.docType)) {
+    throw new Error('Only an invoice can be marked paid. Convert this document to an invoice first.');
+  }
   if (inv.status === 'paid') return null;
   const [row] = await tx
     .update(settings)
