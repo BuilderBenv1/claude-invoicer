@@ -60,7 +60,14 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
             className="input"
             name="docType"
             value={docType}
-            onChange={(e) => setDocType(e.target.value as DocType)}
+            onChange={(e) => {
+              const next = e.target.value as DocType;
+              setDocType(next);
+              if (next !== 'invoice') {
+                setMarkPaid(false);
+                setPaidAt('');
+              }
+            }}
           >
             {DOC_TYPES.map((t) => (
               <option key={t} value={t}>

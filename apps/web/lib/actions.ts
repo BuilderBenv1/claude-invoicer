@@ -420,7 +420,10 @@ export async function convertDocument(fd: FormData): Promise<void> {
   const db = getDb();
 
   const newId2 = await db.transaction(async (tx) => {
-    const [source] = await tx.select().from(invoices).where(eq(invoices.id, sourceId));
+    // Locked so a concurrent conversion of the same source (double-click, or
+    // the same document open in two tabs) blocks on this row instead of both
+    // transactions reading convertedToId as null and each issuing an invoice.
+    const [source] = await tx.select().from(invoices).where(eq(invoices.id, sourceId)).for('update');
     if (!source) throw new Error('Document not found');
     if (isBillingEvidence(source.docType)) throw new Error('This is already an invoice.');
     if (source.convertedToId) throw new Error('This document has already been converted.');

@@ -27,6 +27,13 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_prefix text NOT NULL DEFAU
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS quote_prefix text NOT NULL DEFAULT 'QUO';
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS proforma_prefix text NOT NULL DEFAULT 'PF';
 
+-- A source document can be converted at most once. Belt and braces with the
+-- row lock in convertDocument: this makes a second invoice for the same source
+-- impossible even if a future code path forgets to lock.
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_converted_from_unique
+  ON invoices (converted_from_id)
+  WHERE converted_from_id IS NOT NULL;
+
 -- Document numbers must be unique. The app has always allowed a manual number
 -- override, so this is the one statement here that can legitimately fail.
 -- It reports the offending numbers rather than a bare constraint violation.
