@@ -149,6 +149,14 @@ One table, three types: `invoices.docType ∈ { 'invoice', 'proforma', 'quote' }
 - Converting either issues a *new* row with `docType='invoice'`, the next real
   invoice number, `convertedFromId` pointing back, and `convertedToId` set on the
   source. The source is not deleted.
+- **Quotes and pro formas are always manual documents** with window fields `-1`,
+  never tied to a tracked week. A week's work is already done, so it is billed
+  with a real invoice; quotes and pro formas are for prospective work. This also
+  keeps them clear of the `invoices_client_week_unique` partial index, which
+  would otherwise let a quote block the real invoice for that week.
+- **Receipts belong to invoices only.** Marking a quote or pro forma "paid" is
+  not a thing; payment against a pro forma is recorded on the invoice it
+  converts into.
 - Only `docType='invoice'` rows count toward revenue, unpaid/overdue totals, the
   weekly "already billed" set (`billedWeekStarts`) and the receipt flow. Every
   query that treats an invoice as billing evidence must filter on `docType`.
@@ -212,7 +220,16 @@ Off by default, ready for when the company is registered.
   invoice detail page, `/i/[token]`, the email bodies, and any dashboard sums.
   The migration backfills `total = subtotal` for existing rows.
 
-## B6. PDF rebuild
+## B6. PDF rebuild — **moved to Phase C**
+
+The logo upload and the full PDF visual rebuild move into Phase C, where the
+brand palette, wordmark and typography are decided. Rebuilding the document's
+look before the brand exists would mean doing it twice. Phase B keeps the PDF
+functionally correct — due date, VAT breakdown, pay-to block, document-type
+title and legal line — and Phase C restyles it, adds the logo, and takes on
+pagination.
+
+The original B6 text follows, as the Phase C requirement:
 
 - `settings.logoDataUrl` (text). Uploaded in Settings via a client-side
   `FileReader`, PNG/JPEG only, rejected above 250 KB. Embedded with pdf-lib's
