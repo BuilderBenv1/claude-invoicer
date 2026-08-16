@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import { formatMoney, toWinAnsi, type WeekProjectDayGrid } from '@claude-invoicer/core';
+import { docTitle, docLegalLine, formatMoney, toWinAnsi, type DocType, type WeekProjectDayGrid } from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -166,6 +166,8 @@ const DESC_MAX = COL_HOURS - (M + 8) - 40;
 export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Array> {
   const { invoice, lines, settings } = detail;
   const tz = settings.timezone;
+  const docType = invoice.docType as DocType;
+  const isQuote = docType === 'quote';
   const doc = await PDFDocument.create();
   let page = doc.addPage([W, H]);
   const f: Fonts = {
@@ -173,7 +175,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
 
-  let y = header(page, f, invoice, 'INVOICE', [invoice.number, invoice.notes ?? ''].filter(Boolean));
+  let y = header(page, f, invoice, docTitle(docType), [invoice.number, invoice.notes ?? ''].filter(Boolean));
 
   /**
    * Guard against pdf-lib's silent negative-y clipping: when there isn't
@@ -195,7 +197,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   draw(page, 'ISSUED', M, y, f.reg, 8, MUTED, RIGHT);
   draw(page, day(invoice.issuedAt, tz), M, y - 14, f.reg, 10, INK, RIGHT);
   let metaY = y - 32;
-  if (invoice.dueAt) {
+  if (invoice.dueAt && !isQuote) {
     draw(page, 'DUE', M, metaY, f.reg, 8, MUTED, RIGHT);
     draw(page, day(invoice.dueAt, tz), M, metaY - 14, f.reg, 10, INK, RIGHT);
     metaY -= 32;
@@ -237,7 +239,19 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
   draw(page, formatMoney(invoice.total, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
 
-  if (invoice.paymentDetails) {
+  // Legal line (pro forma / quote disclaimer). Null for a real invoice, so this
+  // block is a no-op and leaves y untouched.
+  const legalLine = docLegalLine(docType);
+  if (legalLine) {
+    y -= 28;
+    y = ensureSpace(20);
+    draw(page, legalLine, M, y, f.reg, 8, MUTED);
+    y -= 6;
+  }
+
+  // A quote is not a request for payment, so it carries no bank details — the
+  // same rule the web pages apply.
+  if (invoice.paymentDetails && !isQuote) {
     y -= 34;
     y = ensureSpace(payToHeight(invoice.paymentDetails));
     y = payToBlock(page, f, invoice.paymentDetails, y);

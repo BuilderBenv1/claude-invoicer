@@ -609,6 +609,9 @@ export async function updateSettings(fd: FormData): Promise<void> {
       paymentTermsDays: int(fd, 'paymentTermsDays', 14),
       vatRate: num(fd, 'vatRate', 0),
       vatNumber: str(fd, 'vatNumber') || null,
+      invoicePrefix: str(fd, 'invoicePrefix') || 'INV',
+      quotePrefix: str(fd, 'quotePrefix') || 'QUO',
+      proformaPrefix: str(fd, 'proformaPrefix') || 'PF',
     })
     .where(eq(settings.id, 1));
   revalidatePath('/');

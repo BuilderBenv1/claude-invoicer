@@ -58,6 +58,24 @@ export default async function SettingsPage() {
           </p>
         </div>
 
+        <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Document number prefixes</div>
+        <div>
+          <label className="label">Invoice prefix</label>
+          <input name="invoicePrefix" defaultValue={s.invoicePrefix} className="input" />
+        </div>
+        <div>
+          <label className="label">Quote prefix</label>
+          <input name="quotePrefix" defaultValue={s.quotePrefix} className="input" />
+        </div>
+        <div>
+          <label className="label">Pro forma prefix</label>
+          <input name="proformaPrefix" defaultValue={s.proformaPrefix} className="input" />
+          <p className="mt-1 text-xs text-slate-500">
+            Changing a prefix affects only documents issued from now on — numbers already issued keep
+            the prefix they were given.
+          </p>
+        </div>
+
         <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Defaults</div>
         <div>
           <label className="label">Default currency</label>

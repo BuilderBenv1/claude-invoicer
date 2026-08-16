@@ -76,9 +76,9 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
                   </div>
                 )}
                 {invoice.dueAt && !isQuote && (
-                  <div className={`text-xs font-normal ${overdue ? 'text-red-300' : 'text-slate-500'}`}>
+                  <div className={`text-xs font-normal ${canBePaid(invoice.docType) && overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
-                    {overdue ? ' — overdue' : ''}
+                    {canBePaid(invoice.docType) && overdue ? ' — overdue' : ''}
                   </div>
                 )}
               </td>
