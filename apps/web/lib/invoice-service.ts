@@ -161,6 +161,33 @@ export type IssueResult =
   | { ok: true; id: string; number: string }
   | { ok: false; reason: 'already-invoiced' | 'nothing' | 'week-not-finished' | 'client-archived'; number?: string };
 
+type PgUniqueError = {
+  code?: string;
+  constraint?: string;
+  constraint_name?: string;
+  message?: string;
+  cause?: { code?: string; constraint?: string; constraint_name?: string; message?: string };
+};
+
+/**
+ * True only for the unique-violation that actually means "this week is
+ * already invoiced" — `invoices_client_week_unique`. A bare `code === '23505'`
+ * check used to be safe here because that was the only unique constraint on
+ * the table; now `invoices_number_unique` and `invoices_converted_from_unique`
+ * share the same Postgres error code, and neither means "already invoiced".
+ * Falls back to matching the constraint name in the error message when the
+ * driver doesn't surface a structured `constraint`/`constraint_name` field.
+ */
+function isDuplicateWeekError(e: unknown): boolean {
+  const err = e as PgUniqueError;
+  const code = err?.code ?? err?.cause?.code;
+  if (code !== '23505') return false;
+  const constraint = err?.constraint ?? err?.constraint_name ?? err?.cause?.constraint ?? err?.cause?.constraint_name;
+  if (constraint) return constraint === 'invoices_client_week_unique';
+  const message = err?.message ?? err?.cause?.message ?? '';
+  return message.includes('invoices_client_week_unique');
+}
+
 /** Issue one client's week invoice (respecting the saved adjustment + one-offs). */
 export async function issueWeekInvoice(
   clientId: string,
@@ -260,9 +287,7 @@ export async function issueWeekInvoice(
     return { ok: true, id, number };
     });
   } catch (e) {
-    const code = (e as { code?: string; cause?: { code?: string } })?.code
-      ?? (e as { cause?: { code?: string } })?.cause?.code;
-    if (code === '23505') return { ok: false, reason: 'already-invoiced' };
+    if (isDuplicateWeekError(e)) return { ok: false, reason: 'already-invoiced' };
     throw e;
   }
 }

@@ -407,6 +407,14 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
     if (!client) throw new Error('Client not found');
     if (client.archived) throw new Error('This client is archived. Restore them before issuing an invoice.');
 
+    // A hand-typed number that collides with an existing one would otherwise
+    // only surface as a bare unique-constraint violation once it hits the DB —
+    // check it here, at the point of entry, so the user is told plainly.
+    if (customNumber) {
+      const [existing] = await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.number, customNumber));
+      if (existing) throw new Error(`Number ${customNumber} is already used by another document.`);
+    }
+
     const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
     const issuedAt = issuedAtStr ? new Date(`${issuedAtStr}T12:00:00Z`) : undefined;
 
@@ -515,6 +523,9 @@ export async function deleteInvoice(fd: FormData): Promise<void> {
   await requireOwner();
   const invoiceId = str(fd, 'invoiceId');
   const db = getDb();
+  // The other side of a conversion link this delete breaks, if any — revalidated
+  // below so its "converted" badge / link doesn't point at a 404 until then.
+  let linkedId: string | null = null;
   await db.transaction(async (tx) => {
     const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
     if (!inv) return;
@@ -522,10 +533,25 @@ export async function deleteInvoice(fd: FormData): Promise<void> {
       .update(oneOffCharges)
       .set({ billedInvoiceId: null })
       .where(eq(oneOffCharges.billedInvoiceId, invoiceId));
+
+    // Deleting a converted invoice must release its source, or the quote is
+    // left linked to a row that no longer exists and can never be converted again.
+    if (inv.convertedFromId) {
+      await tx.update(invoices).set({ convertedToId: null }).where(eq(invoices.id, inv.convertedFromId));
+      linkedId = inv.convertedFromId;
+    }
+    // Deleting the source of a conversion leaves the same dangling link in the
+    // other direction — clear the target's back-reference too.
+    if (inv.convertedToId) {
+      await tx.update(invoices).set({ convertedFromId: null }).where(eq(invoices.id, inv.convertedToId));
+      linkedId = inv.convertedToId;
+    }
+
     await tx.delete(invoices).where(eq(invoices.id, invoiceId));
   });
   revalidatePath('/');
   revalidatePath('/invoices');
+  if (linkedId) revalidatePath('/invoices/' + linkedId);
   redirect('/invoices');
 }
 
