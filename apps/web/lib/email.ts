@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 import type { InvoiceDetail } from './queries';
 import { renderInvoicePdf, renderReceiptPdf } from './pdf/render';
 import { formatMoney, formatDate } from './format';
-import { docLabel } from '@claude-invoicer/core';
+import { docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 import type { Invoice, InvoiceLine } from './db/schema';
 
 function escapeHtml(s: string): string {
@@ -31,8 +31,9 @@ ${title}${bodyRows}
 
 function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: string): string {
   const docType = invoice.docType;
-  const isQuote = docType === 'quote';
+  const requestsPayment = isRequestForPayment(docType);
   const label = docLabel(docType);
+  const legalLine = docLegalLine(docType);
   const rows = lines
     .map(
       (l) =>
@@ -40,16 +41,17 @@ function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: s
          <td style="padding:6px 0;border-bottom:1px solid #e8ecf3;text-align:right">${formatMoney(l.amount, invoice.currency)}</td></tr>`,
     )
     .join('');
-  const intro = isQuote
+  const intro = !requestsPayment
     ? `Here's your quote <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}. Reply to this email if you'd like to accept it.`
     : `Here is ${escapeHtml(label.toLowerCase())} <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}.`;
-  const cta = isQuote ? 'View quote' : `View &amp; pay ${escapeHtml(label.toLowerCase())}`;
+  const cta = !requestsPayment ? 'View quote' : `View &amp; pay ${escapeHtml(label.toLowerCase())}`;
   const body = `
 <p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
 <p>${intro}</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">${rows}
-<tr><td style="padding:10px 0;font-weight:600">Total due</td>
+<tr><td style="padding:10px 0;font-weight:600">${escapeHtml(totalLabel(docType))}</td>
 <td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.total, invoice.currency)}</td></tr></table>
+${legalLine ? `<p style="color:#7a8699;font-size:12px">${escapeHtml(legalLine)}</p>` : ''}
 <p style="margin:24px 0">
   <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">${cta}</a>
 </p>

@@ -4,7 +4,7 @@ import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markInvoicePaid, deleteInvoice, emailInvoice, convertDocument } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue, isBillingEvidence, docLabel, docLegalLine } from '@claude-invoicer/core';
+import { isOverdue, isBillingEvidence, docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
   const billable = isBillingEvidence(invoice.docType);
   const legalLine = docLegalLine(invoice.docType);
-  const isQuote = invoice.docType === 'quote';
+  const requestsPayment = isRequestForPayment(invoice.docType);
 
   return (
     <div className="space-y-8">
@@ -91,7 +91,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <tfoot>
             <tr className="border-t border-slate-700">
               <td className="pt-3 font-semibold" colSpan={3}>
-                Total due
+                {totalLabel(invoice.docType)}
               </td>
               <td className="pt-3 text-right text-lg font-semibold">
                 {formatMoney(invoice.total, invoice.currency)}
@@ -101,7 +101,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                     {formatMoney(invoice.taxAmount, invoice.currency)}
                   </div>
                 )}
-                {invoice.dueAt && !isQuote && (
+                {invoice.dueAt && requestsPayment && (
                   <div className={`text-xs font-normal ${billable && overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
                     {billable && overdue ? ' — overdue' : ''}
@@ -115,7 +115,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       {legalLine && <p className="text-xs text-slate-500">{legalLine}</p>}
 
-      {invoice.paymentDetails && (
+      {invoice.paymentDetails && requestsPayment && (
         <section className="card space-y-1">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
           {invoice.paymentDetails.split('\n').map((line, i) => (
@@ -154,7 +154,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">
-          Download invoice PDF
+          Download {docLabel(invoice.docType).toLowerCase()} PDF
         </a>
 
         {billable ? (

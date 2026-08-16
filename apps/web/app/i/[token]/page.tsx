@@ -3,7 +3,7 @@ import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
-import { isOverdue, canBePaid, docLabel, docLegalLine } from '@claude-invoicer/core';
+import { isOverdue, canBePaid, docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
   const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
-  const isQuote = invoice.docType === 'quote';
+  const requestsPayment = isRequestForPayment(invoice.docType);
   const legalLine = docLegalLine(invoice.docType);
 
   return (
@@ -45,7 +45,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
       </header>
 
       <div className="text-sm text-slate-400">
-        Billed to <span className="text-slate-200">{invoice.clientName}</span>
+        {requestsPayment ? 'Billed to' : 'Quote for'} <span className="text-slate-200">{invoice.clientName}</span>
       </div>
 
       <div className="card">
@@ -66,7 +66,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-700">
-              <td className="pt-3 font-semibold">Total due</td>
+              <td className="pt-3 font-semibold">{totalLabel(invoice.docType)}</td>
               <td className="pt-3 text-right text-lg font-semibold">
                 {formatMoney(invoice.total, invoice.currency)}
                 {invoice.taxAmount !== 0 && (
@@ -75,7 +75,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
                     {formatMoney(invoice.taxAmount, invoice.currency)}
                   </div>
                 )}
-                {invoice.dueAt && !isQuote && (
+                {invoice.dueAt && requestsPayment && (
                   <div className={`text-xs font-normal ${canBePaid(invoice.docType) && overdue ? 'text-red-300' : 'text-slate-500'}`}>
                     Due {formatDate(invoice.dueAt, settings.timezone)}
                     {canBePaid(invoice.docType) && overdue ? ' — overdue' : ''}
@@ -91,7 +91,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
         <div className="card border border-amber-900/40 bg-amber-950/20 text-sm text-amber-200">{legalLine}</div>
       )}
 
-      {invoice.paymentDetails && !isQuote && (
+      {invoice.paymentDetails && requestsPayment && (
         <section className="card space-y-1">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
           {invoice.paymentDetails.split('\n').map((line, i) => (
@@ -104,7 +104,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/i/${token}/pdf`} target="_blank" rel="noreferrer">
-          Download invoice PDF
+          Download {docLabel(invoice.docType).toLowerCase()} PDF
         </a>
         {!paid && canBePaid(invoice.docType) ? (
           <form action={markPaidPublic}>

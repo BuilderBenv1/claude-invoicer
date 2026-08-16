@@ -1,7 +1,16 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import { docTitle, docLegalLine, formatMoney, toWinAnsi, type WeekProjectDayGrid } from '@claude-invoicer/core';
+import {
+  canBePaid,
+  docTitle,
+  docLegalLine,
+  formatMoney,
+  isRequestForPayment,
+  totalLabel,
+  toWinAnsi,
+  type WeekProjectDayGrid,
+} from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -167,7 +176,6 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   const { invoice, lines, settings } = detail;
   const tz = settings.timezone;
   const docType = invoice.docType;
-  const isQuote = docType === 'quote';
   const doc = await PDFDocument.create();
   let page = doc.addPage([W, H]);
   const f: Fonts = {
@@ -197,14 +205,26 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   draw(page, 'ISSUED', M, y, f.reg, 8, MUTED, RIGHT);
   draw(page, day(invoice.issuedAt, tz), M, y - 14, f.reg, 10, INK, RIGHT);
   let metaY = y - 32;
-  if (invoice.dueAt && !isQuote) {
+  // Bottom of the meta column so far — starts as the ISSUED block's own bottom,
+  // and is pushed down again after each further block that actually draws, so
+  // it always reflects the last thing really on the page rather than assuming
+  // every block below fired.
+  let metaBottom = y - 14;
+  if (invoice.dueAt && isRequestForPayment(docType)) {
     draw(page, 'DUE', M, metaY, f.reg, 8, MUTED, RIGHT);
     draw(page, day(invoice.dueAt, tz), M, metaY - 14, f.reg, 10, INK, RIGHT);
+    metaBottom = metaY - 14;
     metaY -= 32;
   }
-  draw(page, 'STATUS', M, metaY, f.reg, 8, MUTED, RIGHT);
-  draw(page, invoice.status.toUpperCase(), M, metaY - 14, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
-  const metaBottom = metaY - 14;
+  // A quote or pro forma is never billing evidence — it can't be "paid" in this
+  // system — so printing STATUS on one would contradict the legal line right
+  // below it (a quote PDF that says "not a request for payment" right under
+  // "STATUS: UNPAID"). Gated the same way the web pages gate their status pill.
+  if (canBePaid(docType)) {
+    draw(page, 'STATUS', M, metaY, f.reg, 8, MUTED, RIGHT);
+    draw(page, invoice.status.toUpperCase(), M, metaY - 14, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
+    metaBottom = metaY - 14;
+  }
 
   // Table
   y = Math.min(leftBottom, metaBottom) - 34;
@@ -236,7 +256,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
     draw(page, formatMoney(invoice.taxAmount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
     y -= 18;
   }
-  draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
+  draw(page, totalLabel(docType), M, y, f.bold, 13, INK, COL_RATE);
   draw(page, formatMoney(invoice.total, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
 
   // Legal line (pro forma / quote disclaimer). Null for a real invoice, so this
@@ -251,7 +271,7 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
 
   // A quote is not a request for payment, so it carries no bank details — the
   // same rule the web pages apply.
-  if (invoice.paymentDetails && !isQuote) {
+  if (invoice.paymentDetails && isRequestForPayment(docType)) {
     y -= 34;
     y = ensureSpace(payToHeight(invoice.paymentDetails));
     y = payToBlock(page, f, invoice.paymentDetails, y);
