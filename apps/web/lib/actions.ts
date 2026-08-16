@@ -7,6 +7,8 @@ import {
   canDeleteClient,
   confirmationMatches,
   DEFAULT_ACCOUNT_KEY,
+  isBillingEvidence,
+  isDocType,
   isKnownCurrency,
   normalizeCurrency,
   normalizePath,
@@ -14,7 +16,7 @@ import {
   weekRange,
 } from '@claude-invoicer/core';
 import { getDb } from './db';
-import { clients, folderMappings, invoices, oneOffCharges, paymentAccounts, settings, weekAdjustments } from './db/schema';
+import { clients, folderMappings, invoiceLines, invoices, oneOffCharges, paymentAccounts, settings, weekAdjustments } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
 import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
@@ -363,6 +365,9 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
   }
   if (lines.length === 0) throw new Error('Add at least one line item with a description and amount');
 
+  const rawType = str(fd, 'docType') || 'invoice';
+  if (!isDocType(rawType)) throw new Error('Unknown document type');
+
   const customNumber = str(fd, 'number');
   const issuedAtStr = str(fd, 'issuedAt');
   const markPaid = str(fd, 'markPaid') === '1';
@@ -389,9 +394,10 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
       notes: 'Manual invoice',
       number: customNumber || undefined,
       issuedAt,
+      docType: rawType,
     });
 
-    if (markPaid) {
+    if (markPaid && isBillingEvidence(rawType)) {
       const paidAt = paidAtStr ? new Date(`${paidAtStr}T12:00:00Z`) : new Date();
       await markPaidTx(tx, id, paidAt);
     }
@@ -401,6 +407,56 @@ export async function createManualInvoice(fd: FormData): Promise<void> {
   revalidatePath('/');
   revalidatePath('/invoices');
   redirect('/invoices/' + newInvoiceId);
+}
+
+/**
+ * Turn a quote or pro forma into a real invoice: a new document with the next
+ * invoice number, the same lines and totals, linked to the source in both
+ * directions. The source is kept — it is the record of what was quoted.
+ */
+export async function convertDocument(fd: FormData): Promise<void> {
+  const sourceId = str(fd, 'id');
+  if (!sourceId) throw new Error('Missing document id');
+  const db = getDb();
+
+  const newId2 = await db.transaction(async (tx) => {
+    const [source] = await tx.select().from(invoices).where(eq(invoices.id, sourceId));
+    if (!source) throw new Error('Document not found');
+    if (isBillingEvidence(source.docType)) throw new Error('This is already an invoice.');
+    if (source.convertedToId) throw new Error('This document has already been converted.');
+
+    const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
+    if (!s) throw new Error('Settings not initialized');
+    const [client] = await tx.select().from(clients).where(eq(clients.id, source.clientId));
+    if (!client) throw new Error('Client not found');
+    if (client.archived) throw new Error('This client is archived. Restore them before invoicing.');
+
+    const sourceLines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, sourceId));
+
+    const { id } = await insertInvoice(tx, {
+      client,
+      settings: s,
+      lines: sourceLines.map((l) => ({
+        label: l.label,
+        hours: l.hours,
+        ratePerHour: l.ratePerHour,
+        amount: l.amount,
+      })),
+      subtotal: source.subtotal,
+      prevBilledThroughMs: -1,
+      cutoffMs: -1,
+      notes: `Converted from ${source.number}`,
+      docType: 'invoice',
+      convertedFromId: source.id,
+    });
+
+    await tx.update(invoices).set({ convertedToId: id }).where(eq(invoices.id, sourceId));
+    return id;
+  });
+
+  revalidatePath('/invoices');
+  revalidatePath('/invoices/' + sourceId);
+  redirect('/invoices/' + newId2);
 }
 
 export async function markInvoicePaid(fd: FormData): Promise<void> {

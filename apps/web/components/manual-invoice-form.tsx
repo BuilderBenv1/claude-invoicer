@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { createManualInvoice } from '@/lib/actions';
-import { formatMoney } from '@claude-invoicer/core';
+import { DOC_TYPES, docLabel, docLegalLine, formatMoney, type DocType } from '@claude-invoicer/core';
 
 interface ClientOption {
   id: string;
@@ -20,6 +20,7 @@ interface Row {
 const blankRow = (): Row => ({ label: '', hours: '', rate: '', amount: '' });
 
 export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
+  const [docType, setDocType] = useState<DocType>('invoice');
   const [clientId, setClientId] = useState(clients[0]?.id ?? '');
   const [issuedAt, setIssuedAt] = useState('');
   const [number, setNumber] = useState('');
@@ -52,7 +53,23 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
       <input type="hidden" name="lines" value={linesJson} />
       <input type="hidden" name="markPaid" value={markPaid ? '1' : '0'} />
 
-      <div className="card grid gap-4 sm:grid-cols-3">
+      <div className="card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="label">Document type</label>
+          <select
+            className="input"
+            name="docType"
+            value={docType}
+            onChange={(e) => setDocType(e.target.value as DocType)}
+          >
+            {DOC_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {docLabel(t)}
+              </option>
+            ))}
+          </select>
+          {docLegalLine(docType) && <p className="mt-1 text-xs text-slate-500">{docLegalLine(docType)}</p>}
+        </div>
         <div>
           <label className="label">Client</label>
           <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)} required>
@@ -139,21 +156,23 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
         </p>
       </div>
 
-      <div className="card space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={markPaid} onChange={(e) => setMarkPaid(e.target.checked)} />
-          Mark as already paid (issues a receipt immediately)
-        </label>
-        {markPaid && (
-          <div className="w-48">
-            <label className="label">Paid date (optional)</label>
-            <input type="date" name="paidAt" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
-          </div>
-        )}
-      </div>
+      {docType === 'invoice' && (
+        <div className="card space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={markPaid} onChange={(e) => setMarkPaid(e.target.checked)} />
+            Mark as already paid (issues a receipt immediately)
+          </label>
+          {markPaid && (
+            <div className="w-48">
+              <label className="label">Paid date (optional)</label>
+              <input type="date" name="paidAt" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+            </div>
+          )}
+        </div>
+      )}
 
       <button type="submit" className="btn-primary" disabled={!clientId || !linesJson || linesJson === '[]'}>
-        Create invoice
+        Create {docLabel(docType).toLowerCase()}
       </button>
     </form>
   );
