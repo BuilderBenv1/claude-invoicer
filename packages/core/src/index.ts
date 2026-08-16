@@ -59,3 +59,14 @@ export {
   renderPaymentBlock,
   type PaymentAccount,
 } from './payment.js';
+export {
+  DOC_TYPES,
+  isDocType,
+  docLabel,
+  docTitle,
+  docLegalLine,
+  isBillingEvidence,
+  canBePaid,
+  formatDocNumber,
+  type DocType,
+} from './documents.js';
