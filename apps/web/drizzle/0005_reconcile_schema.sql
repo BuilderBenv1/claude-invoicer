@@ -241,10 +241,21 @@ CREATE TABLE IF NOT EXISTS week_adjustments (
   PRIMARY KEY (client_id, week_start_ms)
 );
 
--- ---------- document numbers must be unique ----------
--- Last, and separately, because it is the only statement that can legitimately
--- fail: the app has always allowed a manual number override, so two rows could
--- already share a number. It names them rather than raising a bare 23505.
+COMMIT;
+
+-- ============================================================================
+-- Everything above is committed. The site should now load.
+--
+-- The statement below is DELIBERATELY OUTSIDE that transaction, because it is
+-- the only one here that can legitimately fail — the app has always allowed a
+-- manual document-number override, so two rows may already share a number.
+-- Keeping it separate means a duplicate cannot roll back the schema fix that
+-- brings production back up.
+--
+-- If it reports duplicates: the site is already working. Renumber the named
+-- documents so each has its own number, then re-run just this block.
+-- ============================================================================
+
 DO $$
 DECLARE
   dupes text;
@@ -254,11 +265,9 @@ BEGIN
 
   IF dupes IS NOT NULL THEN
     RAISE EXCEPTION
-      'Cannot add the unique document-number index: these numbers are used more than once: %. Renumber the duplicates (each document needs its own number), then re-run this file.',
+      'Schema is reconciled and the site should be up. Could not add the unique document-number index because these numbers are used more than once: %. Renumber the duplicates, then re-run this final block only.',
       dupes;
   END IF;
 
   CREATE UNIQUE INDEX IF NOT EXISTS invoices_number_unique ON invoices (number);
 END $$;
-
-COMMIT;
