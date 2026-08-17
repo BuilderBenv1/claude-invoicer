@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getInvoiceDetail } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
-import { markInvoicePaid, deleteInvoice, emailInvoice } from '@/lib/actions';
+import { markInvoicePaid, deleteInvoice, emailInvoice, convertDocument } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
+import { isOverdue, isBillingEvidence, docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   if (!detail) notFound();
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
+  const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
+  const billable = isBillingEvidence(invoice.docType);
+  const legalLine = docLegalLine(invoice.docType);
+  const requestsPayment = isRequestForPayment(invoice.docType);
 
   return (
     <div className="space-y-8">
@@ -21,21 +26,43 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <Link href="/invoices" className="text-xs text-slate-500 hover:underline">
             ← Invoices
           </Link>
-          <h1 className="text-2xl font-semibold">{invoice.number}</h1>
+          <h1 className="text-2xl font-semibold">
+            {invoice.number}{' '}
+            <span className="text-base font-normal text-slate-400">{docLabel(invoice.docType)}</span>
+          </h1>
           <p className="text-sm text-slate-400">
             {invoice.clientName} · issued {formatDate(invoice.issuedAt, settings.timezone)}
             {invoice.notes ? ` · ${invoice.notes}` : ''}
           </p>
+          {invoice.vatNumber && <p className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</p>}
+          {invoice.convertedToId && (
+            <p className="text-xs text-slate-500">
+              Converted to{' '}
+              <Link href={`/invoices/${invoice.convertedToId}`} className="underline">
+                the resulting invoice
+              </Link>
+            </p>
+          )}
+          {invoice.convertedFromId && (
+            <p className="text-xs text-slate-500">
+              Converted from{' '}
+              <Link href={`/invoices/${invoice.convertedFromId}`} className="underline">
+                its source document
+              </Link>
+            </p>
+          )}
         </div>
-        <span
-          className={
-            paid
-              ? 'rounded bg-green-900/40 px-3 py-1 text-sm text-green-300'
-              : 'rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300'
-          }
-        >
-          {invoice.status}
-        </span>
+        {billable ? (
+          paid ? (
+            <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
+          ) : overdue ? (
+            <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
+          ) : (
+            <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
+          )
+        ) : invoice.convertedToId ? (
+          <span className="rounded bg-slate-800 px-3 py-1 text-sm text-slate-400">converted</span>
+        ) : null}
       </header>
 
       <div className="card">
@@ -64,15 +91,38 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <tfoot>
             <tr className="border-t border-slate-700">
               <td className="pt-3 font-semibold" colSpan={3}>
-                Total due
+                {totalLabel(invoice.docType)}
               </td>
               <td className="pt-3 text-right text-lg font-semibold">
-                {formatMoney(invoice.subtotal, invoice.currency)}
+                {formatMoney(invoice.total, invoice.currency)}
+                {invoice.taxAmount !== 0 && (
+                  <div className="text-xs font-normal text-slate-500">
+                    Net {formatMoney(invoice.subtotal, invoice.currency)} · VAT {invoice.taxRate}%{' '}
+                    {formatMoney(invoice.taxAmount, invoice.currency)}
+                  </div>
+                )}
+                {invoice.dueAt && requestsPayment && (
+                  <div className={`text-xs font-normal ${billable && overdue ? 'text-red-300' : 'text-slate-500'}`}>
+                    Due {formatDate(invoice.dueAt, settings.timezone)}
+                    {billable && overdue ? ' — overdue' : ''}
+                  </div>
+                )}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
+
+      {legalLine && <p className="text-xs text-slate-500">{legalLine}</p>}
+
+      {invoice.paymentDetails && requestsPayment && (
+        <section className="card space-y-1">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
+          {invoice.paymentDetails.split('\n').map((line, i) => (
+            <div key={i} className="text-sm text-slate-300">{line}</div>
+          ))}
+        </section>
+      )}
 
       {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
@@ -104,20 +154,31 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">
-          Download invoice PDF
+          Download {docLabel(invoice.docType).toLowerCase()} PDF
         </a>
 
-        {!paid ? (
-          <form action={markInvoicePaid}>
-            <input type="hidden" name="invoiceId" value={invoice.id} />
-            <button className="btn-primary" type="submit">
-              Mark paid &amp; issue receipt
-            </button>
-          </form>
+        {billable ? (
+          !paid ? (
+            <form action={markInvoicePaid}>
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <button className="btn-primary" type="submit">
+                Mark paid &amp; issue receipt
+              </button>
+            </form>
+          ) : (
+            <a className="btn-ghost" href={`/api/invoices/${invoice.id}/receipt`} target="_blank" rel="noreferrer">
+              Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
+            </a>
+          )
         ) : (
-          <a className="btn-ghost" href={`/api/invoices/${invoice.id}/receipt`} target="_blank" rel="noreferrer">
-            Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
-          </a>
+          !invoice.convertedToId && (
+            <form action={convertDocument}>
+              <input type="hidden" name="id" value={invoice.id} />
+              <button className="btn-primary" type="submit">
+                Convert to invoice
+              </button>
+            </form>
+          )
         )}
 
         <form action={deleteInvoice} className="ml-auto">

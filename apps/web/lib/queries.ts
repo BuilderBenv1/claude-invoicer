@@ -2,9 +2,12 @@ import { and, desc, eq } from 'drizzle-orm';
 import {
   aggregateIntervals,
   adjustmentLine,
+  billedWeekStarts,
   buildInvoiceLines,
   intervalsForClient,
+  invoiceCountFor,
   invoiceSubtotal,
+  isBillingEvidence,
   normalizePath,
   round2,
   unassignedFolders,
@@ -28,12 +31,14 @@ import {
   invoiceLines,
   invoices,
   oneOffCharges,
+  paymentAccounts,
   receipts,
   weekAdjustments,
   type Client,
   type Invoice,
   type InvoiceLine,
   type OneOffCharge,
+  type PaymentAccountRow,
   type Settings,
   type WeekAdjustment,
 } from './db/schema';
@@ -92,19 +97,6 @@ async function loadAll() {
   };
 }
 
-/**
- * Set of already-invoiced week-start ms for a client. A week invoice records its
- * window start in `prevBilledThroughMs`, so a week is "billed" if any invoice for
- * that client starts at that week's start.
- */
-function billedWeekStarts(invoiceRows: Invoice[], clientId: string): Set<number> {
-  const set = new Set<number>();
-  for (const inv of invoiceRows) {
-    if (inv.clientId === clientId) set.add(inv.prevBilledThroughMs);
-  }
-  return set;
-}
-
 /** Per-week signed hours adjustment for a client, keyed by week-start ms. */
 function adjustmentsFor(rows: WeekAdjustment[], clientId: string): Map<number, number> {
   const m = new Map<number, number>();
@@ -116,6 +108,7 @@ function adjustmentsFor(rows: WeekAdjustment[], clientId: string): Map<number, n
 function unbilledOneOffs(oneOffs: OneOffCharge[], clientId: string): OneOffCharge[] {
   return oneOffs.filter((o) => o.clientId === clientId && !o.billedInvoiceId);
 }
+
 function sumAmounts(items: { amount: number }[]): number {
   return Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 }
@@ -185,6 +178,7 @@ export interface ClientStat {
   unbilledWeeks: number;
   oneOffTotal: number;
   roundIncrementMin: number;
+  invoiceCount: number;
 }
 
 export interface OverviewData {
@@ -193,6 +187,7 @@ export interface OverviewData {
   unassigned: { cwd: string; activeMs: number; lastSeenMs: number }[];
   clients: Client[];
   currentWeekKey: string;
+  archived: { client: Client; invoiceCount: number }[];
 }
 
 export async function getOverview(): Promise<OverviewData> {
@@ -205,6 +200,7 @@ export async function getOverview(): Promise<OverviewData> {
     const adj = adjustmentsFor(adjRows, client.id);
     const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
     const current = weeks.find((w) => w.isCurrent);
+    const invoiceCount = invoiceCountFor(invoiceRows, client.id);
     return {
       client,
       thisWeekMs: current?.activeMs ?? 0,
@@ -213,8 +209,16 @@ export async function getOverview(): Promise<OverviewData> {
       unbilledWeeks: weeks.filter((w) => !w.billed && (w.activeMs > 0 || w.adjustHours !== 0)).length,
       oneOffTotal: sumAmounts(unbilledOneOffs(oneOffs, client.id)),
       roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
+      invoiceCount,
     };
   });
+
+  const db = getDb();
+  const archivedRows = await db.select().from(clients).where(eq(clients.archived, 1)).orderBy(clients.name);
+  const archived = archivedRows.map((client) => ({
+    client,
+    invoiceCount: invoiceCountFor(invoiceRows, client.id),
+  }));
 
   return {
     settings: s,
@@ -222,6 +226,7 @@ export async function getOverview(): Promise<OverviewData> {
     unassigned: unassignedFolders(intervals, coreMappings),
     clients: clientRows,
     currentWeekKey: currentKey,
+    archived,
   };
 }
 
@@ -235,6 +240,7 @@ export interface ClientDetail {
   oneOffTotal: number;
   roundIncrementMin: number;
   currentWeekKey: string;
+  invoiceCount: number;
 }
 
 export async function getClientDetail(clientId: string): Promise<ClientDetail | null> {
@@ -249,6 +255,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
   const adj = adjustmentsFor(adjRows, clientId);
   const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
   const clientOneOffs = unbilledOneOffs(oneOffs, clientId);
+  const invoiceCount = invoiceCountFor(invoiceRows, clientId);
 
   return {
     client,
@@ -260,6 +267,7 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
     oneOffTotal: sumAmounts(clientOneOffs),
     roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
     currentWeekKey: weekStartKey(Date.now(), s.timezone),
+    invoiceCount,
   };
 }
 
@@ -343,7 +351,9 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   const groups = [...groupMap.values()].sort((a, b) => b.activeMs - a.activeMs);
   for (const g of groups) g.sessions.sort((a, b) => a.startMs - b.startMs);
 
-  const invoice = invoiceRows.find((inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs);
+  const invoice = invoiceRows.find(
+    (inv) => inv.clientId === clientId && inv.prevBilledThroughMs === startMs && isBillingEvidence(inv.docType),
+  );
 
   const [adjRow] = await db
     .select()
@@ -375,6 +385,15 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
 export async function listClients(): Promise<Client[]> {
   const db = getDb();
   return db.select().from(clients).where(eq(clients.archived, 0)).orderBy(clients.name);
+}
+
+/** Bank details rows, default first, then by currency. */
+export async function listPaymentAccounts(): Promise<PaymentAccountRow[]> {
+  const db = getDb();
+  const rows = await db.select().from(paymentAccounts);
+  return rows.sort((a, b) =>
+    a.currency === 'DEFAULT' ? -1 : b.currency === 'DEFAULT' ? 1 : a.currency.localeCompare(b.currency),
+  );
 }
 
 export interface InvoiceListRow {

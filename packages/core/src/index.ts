@@ -36,3 +36,45 @@ export {
   type WeekGridRow,
   type WeekProjectDayGrid,
 } from './billing.js';
+export {
+  CURRENCIES,
+  normalizeCurrency,
+  isKnownCurrency,
+  currencySymbol,
+  currencyOptionsWith,
+  formatMoney,
+  type CurrencyOption,
+} from './currency.js';
+export { toWinAnsi } from './text.js';
+export { canDeleteClient, confirmationMatches, type DeleteCheck } from './client-rules.js';
+export {
+  computeTotals,
+  dueDateFrom,
+  isOverdue,
+  type InvoiceTotals,
+} from './invoicing.js';
+export {
+  DEFAULT_ACCOUNT_KEY,
+  resolvePaymentAccount,
+  renderPaymentBlock,
+  type PaymentAccount,
+} from './payment.js';
+export {
+  DOC_TYPES,
+  isDocType,
+  docLabel,
+  docTitle,
+  docLegalLine,
+  isBillingEvidence,
+  canBePaid,
+  totalLabel,
+  isRequestForPayment,
+  prefixesAreDistinct,
+  formatDocNumber,
+  type DocType,
+} from './documents.js';
+export {
+  billedWeekStarts,
+  invoiceCountFor,
+  type BillingEvidenceRow,
+} from './billing-evidence.js';

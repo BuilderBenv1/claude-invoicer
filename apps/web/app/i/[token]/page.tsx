@@ -3,6 +3,7 @@ import { getInvoiceByToken } from '@/lib/queries';
 import { formatMoney, formatDate } from '@/lib/format';
 import { markPaidPublic } from '@/lib/actions';
 import { WeekHoursGrid } from '@/components/week-hours-grid';
+import { isOverdue, canBePaid, docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,30 +13,39 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   if (!detail) notFound();
   const { invoice, lines, receiptNumber, settings, dayGrid } = detail;
   const paid = invoice.status === 'paid';
+  const overdue = isOverdue(invoice.status, invoice.dueAt, Date.now());
+  const requestsPayment = isRequestForPayment(invoice.docType);
+  const legalLine = docLegalLine(invoice.docType);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="flex items-start justify-between">
         <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {docLabel(invoice.docType)}
+          </div>
           <div className="text-lg font-semibold">{invoice.businessName || 'Invoice'}</div>
           <div className="text-sm text-slate-400">
             {invoice.number} · issued {formatDate(invoice.issuedAt, settings.timezone)}
             {invoice.notes ? ` · ${invoice.notes}` : ''}
           </div>
+          {invoice.vatNumber && <div className="text-xs text-slate-500">VAT No: {invoice.vatNumber}</div>}
         </div>
-        <span
-          className={
-            paid
-              ? 'rounded bg-green-900/40 px-3 py-1 text-sm text-green-300'
-              : 'rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300'
-          }
-        >
-          {invoice.status}
-        </span>
+        {canBePaid(invoice.docType) ? (
+          paid ? (
+            <span className="rounded bg-green-900/40 px-3 py-1 text-sm text-green-300">paid</span>
+          ) : overdue ? (
+            <span className="rounded bg-red-900/40 px-3 py-1 text-sm text-red-300">overdue</span>
+          ) : (
+            <span className="rounded bg-amber-900/40 px-3 py-1 text-sm text-amber-300">unpaid</span>
+          )
+        ) : invoice.convertedToId ? (
+          <span className="rounded bg-slate-800 px-3 py-1 text-sm text-slate-400">converted</span>
+        ) : null}
       </header>
 
       <div className="text-sm text-slate-400">
-        Billed to <span className="text-slate-200">{invoice.clientName}</span>
+        {requestsPayment ? 'Billed to' : 'Quote for'} <span className="text-slate-200">{invoice.clientName}</span>
       </div>
 
       <div className="card">
@@ -56,33 +66,58 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-700">
-              <td className="pt-3 font-semibold">Total due</td>
+              <td className="pt-3 font-semibold">{totalLabel(invoice.docType)}</td>
               <td className="pt-3 text-right text-lg font-semibold">
-                {formatMoney(invoice.subtotal, invoice.currency)}
+                {formatMoney(invoice.total, invoice.currency)}
+                {invoice.taxAmount !== 0 && (
+                  <div className="text-xs font-normal text-slate-500">
+                    Net {formatMoney(invoice.subtotal, invoice.currency)} · VAT {invoice.taxRate}%{' '}
+                    {formatMoney(invoice.taxAmount, invoice.currency)}
+                  </div>
+                )}
+                {invoice.dueAt && requestsPayment && (
+                  <div className={`text-xs font-normal ${canBePaid(invoice.docType) && overdue ? 'text-red-300' : 'text-slate-500'}`}>
+                    Due {formatDate(invoice.dueAt, settings.timezone)}
+                    {canBePaid(invoice.docType) && overdue ? ' — overdue' : ''}
+                  </div>
+                )}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
 
+      {legalLine && (
+        <div className="card border border-amber-900/40 bg-amber-950/20 text-sm text-amber-200">{legalLine}</div>
+      )}
+
+      {invoice.paymentDetails && requestsPayment && (
+        <section className="card space-y-1">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Pay to</h2>
+          {invoice.paymentDetails.split('\n').map((line, i) => (
+            <div key={i} className="text-sm text-slate-300">{line}</div>
+          ))}
+        </section>
+      )}
+
       {dayGrid && <WeekHoursGrid grid={dayGrid} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost" href={`/i/${token}/pdf`} target="_blank" rel="noreferrer">
-          Download invoice PDF
+          Download {docLabel(invoice.docType).toLowerCase()} PDF
         </a>
-        {!paid ? (
+        {!paid && canBePaid(invoice.docType) ? (
           <form action={markPaidPublic}>
             <input type="hidden" name="token" value={token} />
             <button className="btn-primary" type="submit">
               Mark as paid
             </button>
           </form>
-        ) : (
+        ) : paid ? (
           <a className="btn-ghost" href={`/i/${token}/receipt`} target="_blank" rel="noreferrer">
             Download receipt {receiptNumber ? `(${receiptNumber})` : ''}
           </a>
-        )}
+        ) : null}
       </div>
 
       {paid && invoice.paidAt && (

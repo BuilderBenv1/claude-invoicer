@@ -1,13 +1,15 @@
 import Link from 'next/link';
 import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
-import { issueInvoice, createClient } from '@/lib/actions';
+import { issueInvoice, archiveClient, unarchiveClient } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
+import { AddClientForm } from '@/components/add-client-form';
+import { DeleteClientForm } from '@/components/delete-client-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function OverviewPage() {
-  const { stats, unassigned, clients, settings, currentWeekKey } = await getOverview();
+  const { stats, unassigned, clients, settings, currentWeekKey, archived } = await getOverview();
   const clientOptions = clients.map((c) => ({ id: c.id, name: c.name }));
 
   return (
@@ -30,7 +32,7 @@ export default async function OverviewPage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {stats.map(({ client, thisWeekMs, thisWeekAmount, thisWeekBilled, unbilledWeeks, oneOffTotal }) => (
+            {stats.map(({ client, thisWeekMs, thisWeekAmount, thisWeekBilled, unbilledWeeks, oneOffTotal, invoiceCount }) => (
               <div key={client.id} className="card">
                 <div className="flex items-start justify-between">
                   <div>
@@ -68,17 +70,69 @@ export default async function OverviewPage() {
                     <div className="font-semibold">{unbilledWeeks}</div>
                   </div>
                 </div>
-                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                   <span>{oneOffTotal > 0 ? `+ ${formatMoney(oneOffTotal, client.currency)} one-off charges` : ''}</span>
-                  <Link href={`/clients/${client.id}`} className="hover:underline">
-                    All weeks →
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/clients/${client.id}`} className="hover:underline">
+                      All weeks →
+                    </Link>
+                    <form action={archiveClient}>
+                      <input type="hidden" name="id" value={client.id} />
+                      <button className="btn-ghost" type="submit">
+                        Archive
+                      </button>
+                    </form>
+                    <DeleteClientForm
+                      clientId={client.id}
+                      clientName={client.name}
+                      invoiceCount={invoiceCount}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {/* Archived clients */}
+      {archived.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Archived ({archived.length})
+          </h2>
+          <p className="text-xs text-slate-500">
+            Archived clients are excluded from billing, the dashboard totals and the weekly auto-send.
+          </p>
+          <div className="space-y-2">
+            {archived.map(({ client, invoiceCount }) => (
+              <div key={client.id} className="card flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <Link href={`/clients/${client.id}`} className="truncate hover:underline">
+                    {client.name}
+                  </Link>
+                  <div className="text-xs text-slate-500">
+                    {invoiceCount > 0 ? `${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}` : 'never invoiced'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <form action={unarchiveClient}>
+                    <input type="hidden" name="id" value={client.id} />
+                    <button className="btn-ghost" type="submit">
+                      Restore
+                    </button>
+                  </form>
+                  <DeleteClientForm
+                    clientId={client.id}
+                    clientName={client.name}
+                    invoiceCount={invoiceCount}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Unassigned folders */}
       <section className="space-y-3">
@@ -108,25 +162,14 @@ export default async function OverviewPage() {
       {/* Add client */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Add a client</h2>
-        <form action={createClient} className="card grid gap-3 sm:grid-cols-4">
-          <div className="sm:col-span-2">
-            <label className="label">Name</label>
-            <input name="name" className="input" required />
-          </div>
-          <div>
-            <label className="label">Rate / hr</label>
-            <input name="hourlyRate" type="number" step="0.01" defaultValue={0} className="input" />
-          </div>
-          <div>
-            <label className="label">Currency</label>
-            <input name="currency" defaultValue={settings.defaultCurrency} className="input" />
-          </div>
-          <div className="sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Add client
-            </button>
-          </div>
-        </form>
+        <p className="text-xs text-slate-500">
+          Assigning a folder picks up everything already tracked in it and its subfolders.
+        </p>
+        <AddClientForm
+          unassigned={unassigned}
+          defaultCurrency={settings.defaultCurrency}
+          timezone={settings.timezone}
+        />
       </section>
     </div>
   );

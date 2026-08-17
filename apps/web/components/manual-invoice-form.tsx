@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { createManualInvoice } from '@/lib/actions';
+import { DOC_TYPES, docLabel, docLegalLine, formatMoney, type DocType } from '@claude-invoicer/core';
 
 interface ClientOption {
   id: string;
@@ -16,17 +17,10 @@ interface Row {
   amount: string;
 }
 
-function money(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-}
-
 const blankRow = (): Row => ({ label: '', hours: '', rate: '', amount: '' });
 
 export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
+  const [docType, setDocType] = useState<DocType>('invoice');
   const [clientId, setClientId] = useState(clients[0]?.id ?? '');
   const [issuedAt, setIssuedAt] = useState('');
   const [number, setNumber] = useState('');
@@ -35,6 +29,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
   const [rows, setRows] = useState<Row[]>([blankRow()]);
 
   const currency = clients.find((c) => c.id === clientId)?.currency ?? 'USD';
+  const legalLine = docLegalLine(docType);
 
   const computed = useMemo(
     () =>
@@ -59,7 +54,30 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
       <input type="hidden" name="lines" value={linesJson} />
       <input type="hidden" name="markPaid" value={markPaid ? '1' : '0'} />
 
-      <div className="card grid gap-4 sm:grid-cols-3">
+      <div className="card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="label">Document type</label>
+          <select
+            className="input"
+            name="docType"
+            value={docType}
+            onChange={(e) => {
+              const next = e.target.value as DocType;
+              setDocType(next);
+              if (next !== 'invoice') {
+                setMarkPaid(false);
+                setPaidAt('');
+              }
+            }}
+          >
+            {DOC_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {docLabel(t)}
+              </option>
+            ))}
+          </select>
+          {legalLine && <p className="mt-1 text-xs text-slate-500">{legalLine}</p>}
+        </div>
         <div>
           <label className="label">Client</label>
           <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)} required>
@@ -76,7 +94,7 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
           <input type="date" name="issuedAt" className="input" value={issuedAt} onChange={(e) => setIssuedAt(e.target.value)} />
         </div>
         <div>
-          <label className="label">Invoice # (optional override)</label>
+          <label className="label">{docLabel(docType)} # (optional override)</label>
           <input name="number" className="input" placeholder="auto" value={number} onChange={(e) => setNumber(e.target.value)} />
         </div>
       </div>
@@ -136,30 +154,33 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
             + Add line
           </button>
           <div className="text-right">
-            <div className="label">Total</div>
-            <div className="text-lg font-semibold">{money(total, currency)}</div>
+            <div className="label">Subtotal (net)</div>
+            <div className="text-lg font-semibold">{formatMoney(total, currency)}</div>
           </div>
         </div>
         <p className="text-xs text-slate-500">
           Enter Hours × Rate for hourly work, or leave them blank and type an Amount for a flat fee.
+          The issued total may be higher once VAT is applied.
         </p>
       </div>
 
-      <div className="card space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={markPaid} onChange={(e) => setMarkPaid(e.target.checked)} />
-          Mark as already paid (issues a receipt immediately)
-        </label>
-        {markPaid && (
-          <div className="w-48">
-            <label className="label">Paid date (optional)</label>
-            <input type="date" name="paidAt" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
-          </div>
-        )}
-      </div>
+      {docType === 'invoice' && (
+        <div className="card space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={markPaid} onChange={(e) => setMarkPaid(e.target.checked)} />
+            Mark as already paid (issues a receipt immediately)
+          </label>
+          {markPaid && (
+            <div className="w-48">
+              <label className="label">Paid date (optional)</label>
+              <input type="date" name="paidAt" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+            </div>
+          )}
+        </div>
+      )}
 
       <button type="submit" className="btn-primary" disabled={!clientId || !linesJson || linesJson === '[]'}>
-        Create invoice
+        Create {docLabel(docType).toLowerCase()}
       </button>
     </form>
   );

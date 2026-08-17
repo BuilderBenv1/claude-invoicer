@@ -89,16 +89,33 @@ export const invoices = pgTable('invoices', {
     .notNull()
     .references(() => clients.id),
   status: text('status').notNull().default('unpaid'), // 'unpaid' | 'paid'
+  /** 'invoice' | 'proforma' | 'quote'. Only 'invoice' is billing evidence. */
+  docType: text('doc_type').notNull().default('invoice'),
+  /** Set on a converted invoice, pointing at the quote or pro forma it came from. */
+  convertedFromId: text('converted_from_id'),
+  /** Set on a quote or pro forma once it has been converted. */
+  convertedToId: text('converted_to_id'),
   currency: text('currency').notNull(),
   subtotal: doublePrecision('subtotal').notNull(),
   /** Billing window: (prevBilledThroughMs, cutoffMs]. */
   prevBilledThroughMs: bigint('prev_billed_through_ms', { mode: 'number' }).notNull(),
   cutoffMs: bigint('cutoff_ms', { mode: 'number' }).notNull(),
+  /** Snapshot: payment terms applied at issue, in days. 0 = due on receipt. */
+  paymentTermsDays: integer('payment_terms_days').notNull().default(0),
+  dueAt: timestamp('due_at', { withTimezone: true }),
+  /** Snapshot: the rendered pay-to block, newline separated. */
+  paymentDetails: text('payment_details'),
+  /** Snapshot: VAT percentage applied (0 = none). */
+  taxRate: doublePrecision('tax_rate').notNull().default(0),
+  taxAmount: doublePrecision('tax_amount').notNull().default(0),
+  /** The payable figure: subtotal + taxAmount. `subtotal` is strictly net. */
+  total: doublePrecision('total').notNull().default(0),
   // snapshots
   businessName: text('business_name').notNull().default(''),
   businessEmail: text('business_email'),
   businessAddress: text('business_address'),
   taxId: text('tax_id'),
+  vatNumber: text('vat_number'),
   publicToken: text('public_token'),
   emailedAt: timestamp('emailed_at', { withTimezone: true }),
   emailedTo: text('emailed_to'),
@@ -112,6 +129,10 @@ export const invoices = pgTable('invoices', {
   clientWeekUnique: uniqueIndex('invoices_client_week_unique')
     .on(t.clientId, t.prevBilledThroughMs)
     .where(sql`${t.prevBilledThroughMs} >= 0`),
+  numberUnique: uniqueIndex('invoices_number_unique').on(t.number),
+  convertedFromUnique: uniqueIndex('invoices_converted_from_unique')
+    .on(t.convertedFromId)
+    .where(sql`${t.convertedFromId} IS NOT NULL`),
 }));
 
 export const invoiceLines = pgTable(
@@ -152,8 +173,37 @@ export const settings = pgTable('settings', {
   timezone: text('timezone').notNull().default('UTC'),
   invoiceSeq: integer('invoice_seq').notNull().default(0),
   receiptSeq: integer('receipt_seq').notNull().default(0),
+  quoteSeq: integer('quote_seq').notNull().default(0),
+  proformaSeq: integer('proforma_seq').notNull().default(0),
+  invoicePrefix: text('invoice_prefix').notNull().default('INV'),
+  quotePrefix: text('quote_prefix').notNull().default('QUO'),
+  proformaPrefix: text('proforma_prefix').notNull().default('PF'),
   autoSendWeekly: integer('auto_send_weekly').notNull().default(0),
+  /** Default payment terms for new invoices, in days. */
+  paymentTermsDays: integer('payment_terms_days').notNull().default(14),
+  /** VAT percentage; 0 disables VAT entirely. */
+  vatRate: doublePrecision('vat_rate').notNull().default(0),
+  vatNumber: text('vat_number'),
 });
+
+/** Bank details shown on invoices: one row per currency, plus a 'DEFAULT' fallback. */
+export const paymentAccounts = pgTable(
+  'payment_accounts',
+  {
+    id: text('id').primaryKey(),
+    /** An ISO currency code, or 'DEFAULT' for the fallback used by any other currency. */
+    currency: text('currency').notNull(),
+    accountName: text('account_name'),
+    bankName: text('bank_name'),
+    sortCode: text('sort_code'),
+    accountNumber: text('account_number'),
+    iban: text('iban'),
+    bic: text('bic'),
+    routingNumber: text('routing_number'),
+    notes: text('notes'),
+  },
+  (t) => ({ currencyUnique: uniqueIndex('payment_accounts_currency_unique').on(t.currency) }),
+);
 
 /** Signed per-week billable-hours adjustment (applied at issue time). */
 export const weekAdjustments = pgTable(
@@ -176,3 +226,4 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
 export type OneOffCharge = typeof oneOffCharges.$inferSelect;
 export type WeekAdjustment = typeof weekAdjustments.$inferSelect;
+export type PaymentAccountRow = typeof paymentAccounts.$inferSelect;

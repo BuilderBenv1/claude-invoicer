@@ -1,7 +1,16 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { InvoiceDetail } from '../queries';
 import type { Invoice, InvoiceLine } from '../db/schema';
-import type { WeekProjectDayGrid } from '@claude-invoicer/core';
+import {
+  canBePaid,
+  docTitle,
+  docLegalLine,
+  formatMoney,
+  isRequestForPayment,
+  totalLabel,
+  toWinAnsi,
+  type WeekProjectDayGrid,
+} from '@claude-invoicer/core';
 
 // A4 in points.
 const W = 595.28;
@@ -14,13 +23,6 @@ const MUTED = rgb(0.39, 0.45, 0.55);
 const LINE = rgb(0.886, 0.91, 0.945);
 const GREEN = rgb(0.086, 0.64, 0.29);
 
-function money(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-}
 function day(d: Date | string | number, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: 'short', day: '2-digit' }).format(
     new Date(d),
@@ -43,17 +45,25 @@ function draw(
   color = INK,
   rightAlignTo?: number,
 ) {
+  const safe = toWinAnsi(text);
   let drawX = x;
-  if (rightAlignTo !== undefined) drawX = rightAlignTo - font.widthOfTextAtSize(text, size);
-  page.drawText(text, { x: drawX, y, size, font, color });
+  if (rightAlignTo !== undefined) drawX = rightAlignTo - font.widthOfTextAtSize(safe, size);
+  page.drawText(safe, { x: drawX, y, size, font, color });
 }
 
 /** Truncate a string to fit a max width at the given font/size, adding an ellipsis. */
 function fit(text: string, font: PDFFont, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  let s = text;
+  let s = toWinAnsi(text);
+  if (font.widthOfTextAtSize(s, size) <= maxWidth) return s;
   while (s.length > 1 && font.widthOfTextAtSize(s + '…', size) > maxWidth) s = s.slice(0, -1);
   return s + '…';
+}
+
+/** Draw text horizontally centred on the page. Sanitises once, so the measured string is the drawn one. */
+function drawCentered(page: PDFPage, text: string, y: number, font: PDFFont, size: number, color = INK) {
+  const safe = toWinAnsi(text);
+  const x = (W - font.widthOfTextAtSize(safe, size)) / 2;
+  page.drawText(safe, { x, y, size, font, color });
 }
 
 function hr(page: PDFPage, y: number) {
@@ -72,7 +82,12 @@ function header(page: PDFPage, f: Fonts, invoice: Invoice, title: string, subtit
   let by = y - 4;
   draw(page, invoice.businessName || 'My Business', M, by, f.bold, 11, INK, RIGHT);
   by -= 13;
-  for (const v of [invoice.businessEmail, invoice.businessAddress, invoice.taxId ? `Tax ID: ${invoice.taxId}` : null]) {
+  for (const v of [
+    invoice.businessEmail,
+    invoice.businessAddress,
+    invoice.taxId ? `Tax ID: ${invoice.taxId}` : null,
+    invoice.vatNumber ? `VAT No: ${invoice.vatNumber}` : null,
+  ]) {
     if (!v) continue;
     draw(page, v, M, by, f.reg, 9, MUTED, RIGHT);
     by -= 12;
@@ -92,6 +107,24 @@ function partyBlock(page: PDFPage, f: Fonts, label: string, name: string, extra:
     yy -= 12;
   }
   return yy;
+}
+
+/** Bank details block, drawn from the invoice's snapshotted newline-separated text. */
+function payToBlock(page: PDFPage, f: Fonts, details: string, y: number): number {
+  draw(page, 'PAY TO', M, y, f.reg, 8, MUTED);
+  let yy = y - 14;
+  for (const line of details.split('\n')) {
+    if (!line.trim()) continue;
+    draw(page, fit(line, f.reg, 9, RIGHT - M), M, yy, f.reg, 9, INK);
+    yy -= 12;
+  }
+  return yy;
+}
+
+/** Rendered height of the pay-to block for a given payment-details snapshot. */
+function payToHeight(details: string): number {
+  const lineCount = details.split('\n').filter((l) => l.trim()).length;
+  return 14 + lineCount * 12;
 }
 
 // 9-column hours grid: Project label + 7 day columns + Total, right-aligned numerics.
@@ -128,6 +161,11 @@ function drawDayGrid(page: PDFPage, f: Fonts, grid: WeekProjectDayGrid, startY: 
   return y - 22;
 }
 
+/** Rendered height of the hours-by-day grid: title + header rows + one row per project + footer. */
+function dayGridHeight(grid: WeekProjectDayGrid): number {
+  return 16 + 9 + 6 + 12 + grid.rows.length * 12 + 22;
+}
+
 // Column right edges for the line-items table.
 const COL_HOURS = RIGHT - 165;
 const COL_RATE = RIGHT - 85;
@@ -137,23 +175,56 @@ const DESC_MAX = COL_HOURS - (M + 8) - 40;
 export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Array> {
   const { invoice, lines, settings } = detail;
   const tz = settings.timezone;
+  const docType = invoice.docType;
   const doc = await PDFDocument.create();
-  const page = doc.addPage([W, H]);
+  let page = doc.addPage([W, H]);
   const f: Fonts = {
     reg: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
 
-  let y = header(page, f, invoice, 'INVOICE', [invoice.number, invoice.notes ?? ''].filter(Boolean));
+  let y = header(page, f, invoice, docTitle(docType), [invoice.number, invoice.notes ?? ''].filter(Boolean));
+
+  /**
+   * Guard against pdf-lib's silent negative-y clipping: when there isn't
+   * `needed` pts of room left above the bottom margin, start a fresh page and
+   * reset `y` to the top. Not a pagination rewrite — just stops content from
+   * being lost off the bottom of the page.
+   */
+  function ensureSpace(needed: number): number {
+    if (y - needed < M) {
+      page = doc.addPage([W, H]);
+      y = H - M;
+    }
+    return y;
+  }
 
   // Bill-to (left) + meta (right). The table starts below whichever block is lower
   // so the status never collides with the table.
   const leftBottom = partyBlock(page, f, 'Bill to', invoice.clientName, [invoice.clientEmail, invoice.clientAddress], y);
   draw(page, 'ISSUED', M, y, f.reg, 8, MUTED, RIGHT);
   draw(page, day(invoice.issuedAt, tz), M, y - 14, f.reg, 10, INK, RIGHT);
-  draw(page, 'STATUS', M, y - 32, f.reg, 8, MUTED, RIGHT);
-  draw(page, invoice.status.toUpperCase(), M, y - 46, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
-  const metaBottom = y - 46;
+  let metaY = y - 32;
+  // Bottom of the meta column so far — starts as the ISSUED block's own bottom,
+  // and is pushed down again after each further block that actually draws, so
+  // it always reflects the last thing really on the page rather than assuming
+  // every block below fired.
+  let metaBottom = y - 14;
+  if (invoice.dueAt && isRequestForPayment(docType)) {
+    draw(page, 'DUE', M, metaY, f.reg, 8, MUTED, RIGHT);
+    draw(page, day(invoice.dueAt, tz), M, metaY - 14, f.reg, 10, INK, RIGHT);
+    metaBottom = metaY - 14;
+    metaY -= 32;
+  }
+  // A quote or pro forma is never billing evidence — it can't be "paid" in this
+  // system — so printing STATUS on one would contradict the legal line right
+  // below it (a quote PDF that says "not a request for payment" right under
+  // "STATUS: UNPAID"). Gated the same way the web pages gate their status pill.
+  if (canBePaid(docType)) {
+    draw(page, 'STATUS', M, metaY, f.reg, 8, MUTED, RIGHT);
+    draw(page, invoice.status.toUpperCase(), M, metaY - 14, f.bold, 11, invoice.status === 'paid' ? GREEN : MUTED, RIGHT);
+    metaBottom = metaY - 14;
+  }
 
   // Table
   y = Math.min(leftBottom, metaBottom) - 34;
@@ -165,23 +236,51 @@ export async function renderInvoicePdf(detail: InvoiceDetail): Promise<Uint8Arra
   y -= 26;
 
   for (const l of lines as InvoiceLine[]) {
+    y = ensureSpace(24);
     const flat = l.hours === 0 && l.ratePerHour === 0;
     draw(page, fit(l.label, f.reg, 10, DESC_MAX), M + 8, y, f.reg, 10);
     draw(page, flat ? '—' : l.hours.toFixed(2), M, y, f.reg, 10, INK, COL_HOURS);
-    draw(page, flat ? '—' : money(l.ratePerHour, invoice.currency), M, y, f.reg, 10, INK, COL_RATE);
-    draw(page, money(l.amount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    draw(page, flat ? '—' : formatMoney(l.ratePerHour, invoice.currency), M, y, f.reg, 10, INK, COL_RATE);
+    draw(page, formatMoney(l.amount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
     page.drawLine({ start: { x: M, y: y - 9 }, end: { x: RIGHT, y: y - 9 }, thickness: 0.5, color: LINE });
     y -= 24;
   }
 
   // Total
   y -= 10;
-  draw(page, 'Total due', M, y, f.bold, 13, INK, COL_RATE);
-  draw(page, money(invoice.subtotal, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+  if (invoice.taxAmount !== 0) {
+    draw(page, 'Subtotal', M, y, f.reg, 10, MUTED, COL_RATE);
+    draw(page, formatMoney(invoice.subtotal, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    y -= 16;
+    draw(page, `VAT ${invoice.taxRate}%`, M, y, f.reg, 10, MUTED, COL_RATE);
+    draw(page, formatMoney(invoice.taxAmount, invoice.currency), M, y, f.reg, 10, INK, COL_AMT);
+    y -= 18;
+  }
+  draw(page, totalLabel(docType), M, y, f.bold, 13, INK, COL_RATE);
+  draw(page, formatMoney(invoice.total, invoice.currency), M, y, f.bold, 13, INK, COL_AMT);
+
+  // Legal line (pro forma / quote disclaimer). Null for a real invoice, so this
+  // block is a no-op and leaves y untouched.
+  const legalLine = docLegalLine(docType);
+  if (legalLine) {
+    y -= 28;
+    y = ensureSpace(20);
+    draw(page, legalLine, M, y, f.reg, 8, MUTED);
+    y -= 6;
+  }
+
+  // A quote is not a request for payment, so it carries no bank details — the
+  // same rule the web pages apply.
+  if (invoice.paymentDetails && isRequestForPayment(docType)) {
+    y -= 34;
+    y = ensureSpace(payToHeight(invoice.paymentDetails));
+    y = payToBlock(page, f, invoice.paymentDetails, y);
+  }
 
   // Hours-by-day breakdown (week invoices only; skipped for manual/one-off)
   if (detail.dayGrid && detail.dayGrid.rows.length > 0) {
     y -= 30;
+    y = ensureSpace(dayGridHeight(detail.dayGrid));
     y = drawDayGrid(page, f, detail.dayGrid, y);
   }
 
@@ -220,11 +319,11 @@ export async function renderReceiptPdf(detail: InvoiceDetail): Promise<Uint8Arra
   // Centered amount block
   const cy = y - 120;
   const lbl = 'AMOUNT PAID';
-  draw(page, lbl, (W - f.reg.widthOfTextAtSize(lbl, 8)) / 2, cy + 44, f.reg, 8, MUTED);
-  const amt = money(invoice.subtotal, invoice.currency);
-  draw(page, amt, (W - f.bold.widthOfTextAtSize(amt, 30)) / 2, cy + 14, f.bold, 30);
+  drawCentered(page, lbl, cy + 44, f.reg, 8, MUTED);
+  const amt = formatMoney(invoice.total, invoice.currency);
+  drawCentered(page, amt, cy + 14, f.bold, 30);
   const paid = 'PAID IN FULL';
-  draw(page, paid, (W - f.bold.widthOfTextAtSize(paid, 13)) / 2, cy - 8, f.bold, 13, GREEN);
+  drawCentered(page, paid, cy - 8, f.bold, 13, GREEN);
 
   draw(page, 'Generated by Claude Invoicer', M, M, f.reg, 8, MUTED);
 

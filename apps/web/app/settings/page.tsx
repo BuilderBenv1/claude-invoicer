@@ -1,10 +1,13 @@
 import { getSettings } from '@/lib/settings';
 import { updateSettings } from '@/lib/actions';
+import { listPaymentAccounts } from '@/lib/queries';
+import { CurrencySelect } from '@/components/currency-select';
+import { PaymentAccountsForm } from '@/components/payment-accounts-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const s = await getSettings();
+  const [s, accounts] = await Promise.all([getSettings(), listPaymentAccounts()]);
 
   return (
     <div className="space-y-6">
@@ -28,11 +31,57 @@ export default async function SettingsPage() {
           <label className="label">Tax ID</label>
           <input name="taxId" defaultValue={s.taxId ?? ''} className="input" />
         </div>
+        <div>
+          <label className="label">VAT number</label>
+          <input name="vatNumber" defaultValue={s.vatNumber ?? ''} className="input" />
+        </div>
+        <div>
+          <label className="label">VAT rate (%)</label>
+          <input name="vatRate" type="number" step="0.1" min="0" defaultValue={s.vatRate} className="input" />
+          <p className="mt-1 text-xs text-slate-500">
+            0 turns off VAT — no VAT line on invoices. Set 20 once you are registered. The VAT
+            number above prints on every invoice whenever it is filled in, whether or not VAT is
+            on. Invoices already issued keep the rate and number they were issued with.
+          </p>
+        </div>
+        <div>
+          <label className="label">Payment terms (days)</label>
+          <input
+            name="paymentTermsDays"
+            type="number"
+            min="0"
+            defaultValue={s.paymentTermsDays}
+            className="input"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Sets the due date printed on new invoices. 0 means due on receipt.
+          </p>
+        </div>
+
+        <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Document number prefixes</div>
+        <div>
+          <label className="label">Invoice prefix</label>
+          <input name="invoicePrefix" defaultValue={s.invoicePrefix} className="input" />
+        </div>
+        <div>
+          <label className="label">Quote prefix</label>
+          <input name="quotePrefix" defaultValue={s.quotePrefix} className="input" />
+        </div>
+        <div>
+          <label className="label">Pro forma prefix</label>
+          <input name="proformaPrefix" defaultValue={s.proformaPrefix} className="input" />
+          <p className="mt-1 text-xs text-slate-500">
+            Changing a prefix affects only documents issued from now on — numbers already issued keep
+            the prefix they were given. The three prefixes must all be different, or numbers from one
+            type could collide with another's.
+          </p>
+        </div>
 
         <div className="sm:col-span-2 mt-2 text-sm font-semibold text-slate-300">Defaults</div>
         <div>
           <label className="label">Default currency</label>
-          <input name="defaultCurrency" defaultValue={s.defaultCurrency} className="input" />
+          <CurrencySelect name="defaultCurrency" defaultValue={s.defaultCurrency} />
+          <p className="mt-1 text-xs text-slate-500">Used for new clients. Existing clients keep their own.</p>
         </div>
         <div>
           <label className="label">Timezone (IANA, e.g. Asia/Jerusalem)</label>
@@ -76,6 +125,18 @@ export default async function SettingsPage() {
           </button>
         </div>
       </form>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Payment details (printed on invoices)
+        </h2>
+        <p className="text-xs text-slate-500">
+          An invoice shows the details matching its currency, falling back to the default. Only the
+          fields you fill in are printed, and the details are copied onto each invoice as it is
+          issued — changing them later never alters an invoice you have already sent.
+        </p>
+        <PaymentAccountsForm accounts={accounts} />
+      </section>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import type { InvoiceDetail } from './queries';
 import { renderInvoicePdf, renderReceiptPdf } from './pdf/render';
 import { formatMoney, formatDate } from './format';
+import { docLabel, docLegalLine, isRequestForPayment, totalLabel } from '@claude-invoicer/core';
 import type { Invoice, InvoiceLine } from './db/schema';
 
 function escapeHtml(s: string): string {
@@ -29,6 +30,10 @@ ${title}${bodyRows}
 }
 
 function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: string): string {
+  const docType = invoice.docType;
+  const requestsPayment = isRequestForPayment(docType);
+  const label = docLabel(docType);
+  const legalLine = docLegalLine(docType);
   const rows = lines
     .map(
       (l) =>
@@ -36,24 +41,29 @@ function invoiceHtml(invoice: Invoice, lines: InvoiceLine[], link: string, tz: s
          <td style="padding:6px 0;border-bottom:1px solid #e8ecf3;text-align:right">${formatMoney(l.amount, invoice.currency)}</td></tr>`,
     )
     .join('');
+  const intro = !requestsPayment
+    ? `Here's your quote <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}. Reply to this email if you'd like to accept it.`
+    : `Here is ${escapeHtml(label.toLowerCase())} <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}.`;
+  const cta = !requestsPayment ? 'View quote' : `View &amp; pay ${escapeHtml(label.toLowerCase())}`;
   const body = `
 <p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
-<p>Here is invoice <strong>${escapeHtml(invoice.number)}</strong>${invoice.notes ? ` (${escapeHtml(invoice.notes)})` : ''} from ${escapeHtml(invoice.businessName || 'your contractor')}.</p>
+<p>${intro}</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">${rows}
-<tr><td style="padding:10px 0;font-weight:600">Total due</td>
-<td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.subtotal, invoice.currency)}</td></tr></table>
+<tr><td style="padding:10px 0;font-weight:600">${escapeHtml(totalLabel(docType))}</td>
+<td style="padding:10px 0;text-align:right;font-weight:600">${formatMoney(invoice.total, invoice.currency)}</td></tr></table>
+${legalLine ? `<p style="color:#7a8699;font-size:12px">${escapeHtml(legalLine)}</p>` : ''}
 <p style="margin:24px 0">
-  <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">View &amp; pay invoice</a>
+  <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">${cta}</a>
 </p>
-<p style="color:#7a8699;font-size:13px">Issued ${formatDate(invoice.issuedAt, tz)}. The full invoice PDF is attached.</p>`;
-  return shell(`<h2 style="margin:0 0 8px">Invoice ${escapeHtml(invoice.number)}</h2>`, body);
+<p style="color:#7a8699;font-size:13px">Issued ${formatDate(invoice.issuedAt, tz)}. The full ${escapeHtml(label.toLowerCase())} PDF is attached.</p>`;
+  return shell(`<h2 style="margin:0 0 8px">${escapeHtml(label)} ${escapeHtml(invoice.number)}</h2>`, body);
 }
 
 function receiptHtml(invoice: Invoice, receiptNumber: string | null, tz: string): string {
   const body = `
 <p>Hi ${escapeHtml(invoice.clientName || 'there')},</p>
 <p>Thanks — we've recorded invoice <strong>${escapeHtml(invoice.number)}</strong> as paid${invoice.paidAt ? ` on ${formatDate(invoice.paidAt, tz)}` : ''}.</p>
-<p>Your receipt${receiptNumber ? ` <strong>${escapeHtml(receiptNumber)}</strong>` : ''} for ${formatMoney(invoice.subtotal, invoice.currency)} is attached.</p>`;
+<p>Your receipt${receiptNumber ? ` <strong>${escapeHtml(receiptNumber)}</strong>` : ''} for ${formatMoney(invoice.total, invoice.currency)} is attached.</p>`;
   return shell(`<h2 style="margin:0 0 8px">Receipt ${receiptNumber ? escapeHtml(receiptNumber) : ''}</h2>`, body);
 }
 
@@ -64,7 +74,7 @@ export async function sendInvoiceEmail(detail: InvoiceDetail, to: string): Promi
   const { error } = await client().emails.send({
     from: fromAddress(),
     to,
-    subject: `Invoice ${invoice.number} from ${invoice.businessName || 'your contractor'}`,
+    subject: `${docLabel(invoice.docType)} ${invoice.number} from ${invoice.businessName || 'your contractor'}`,
     html: invoiceHtml(invoice, lines, link, settings.timezone),
     attachments: [{ filename: `${invoice.number}.pdf`, content: Buffer.from(pdf) }],
   });

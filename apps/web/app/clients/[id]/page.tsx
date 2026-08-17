@@ -12,9 +12,12 @@ import {
   issueInvoice,
   adjustWeek,
   archiveClient,
+  unarchiveClient,
   billOneOffs,
 } from '@/lib/actions';
 import { BillFromForm } from '@/components/bill-from-form';
+import { CurrencySelect } from '@/components/currency-select';
+import { DeleteClientForm } from '@/components/delete-client-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +26,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
   const detail = await getClientDetail(id);
   if (!detail) notFound();
 
-  const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey } = detail;
+  const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey, invoiceCount } = detail;
   const billableWeeks = weeks.filter((w) => w.activeMs > 0 || w.billed || w.adjustHours !== 0);
   const stepH = Math.round((roundIncrementMin / 60) * 100) / 100;
+  const isArchived = client.archived === 1;
 
   return (
     <div className="space-y-10">
@@ -41,10 +45,17 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         </div>
       </header>
 
+      {isArchived && (
+        <div className="card border border-amber-700/50 bg-amber-950/30 text-sm text-amber-200">
+          This client is archived — excluded from billing, the dashboard and the weekly auto-send.
+          Restore them (below, under Client settings) before invoicing any work.
+        </div>
+      )}
+
       {/* Per-week billing */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Bill by week (Mon–Sun)</h2>
-        {oneOffTotal > 0 && (
+        {oneOffTotal > 0 && !isArchived && (
           <p className="text-xs text-slate-500">
             {formatMoney(oneOffTotal, client.currency)} of unbilled one-off charges — bill them with
             “Bill one-offs now” below, or they ride along when the weekly auto-send issues a week.
@@ -130,6 +141,8 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
                           <span className="rounded bg-green-900/40 px-2 py-0.5 text-xs text-green-300">invoiced</span>
                         ) : isCurrent ? (
                           <span className="text-xs text-slate-500">in progress</span>
+                        ) : isArchived ? (
+                          <span className="text-xs text-slate-500">restore to invoice</span>
                         ) : (
                           <form action={issueInvoice} className="inline">
                             <input type="hidden" name="clientId" value={client.id} />
@@ -224,12 +237,19 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           you issue for this client, or bill them on their own below.
         </p>
         {oneOffTotal > 0 && (
-          <form action={billOneOffs}>
-            <input type="hidden" name="clientId" value={client.id} />
-            <button className="btn-primary" type="submit">
-              Bill one-offs now ({formatMoney(oneOffTotal, client.currency)})
-            </button>
-          </form>
+          isArchived ? (
+            <p className="text-xs text-slate-500">
+              {formatMoney(oneOffTotal, client.currency)} of unbilled one-off charges — restore this client before
+              they can be invoiced.
+            </p>
+          ) : (
+            <form action={billOneOffs}>
+              <input type="hidden" name="clientId" value={client.id} />
+              <button className="btn-primary" type="submit">
+                Bill one-offs now ({formatMoney(oneOffTotal, client.currency)})
+              </button>
+            </form>
+          )
         )}
         <div className="space-y-2">
           {oneOffs.map((o) => (
@@ -275,7 +295,10 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           </div>
           <div>
             <label className="label">Currency</label>
-            <input name="currency" defaultValue={client.currency} className="input" />
+            <CurrencySelect name="currency" defaultValue={client.currency} />
+            <p className="mt-1 text-xs text-slate-500">
+              Invoices already issued keep the currency they were issued in.
+            </p>
           </div>
           <div>
             <label className="label">Rounding override (min, blank = default {settings.defaultRoundIncrementMin})</label>
@@ -300,12 +323,24 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             </button>
           </div>
         </form>
-        <form action={archiveClient}>
-          <input type="hidden" name="id" value={client.id} />
-          <button className="btn-danger" type="submit">
-            Archive client
-          </button>
-        </form>
+        <div className="flex flex-wrap items-center gap-3">
+          {isArchived ? (
+            <form action={unarchiveClient}>
+              <input type="hidden" name="id" value={client.id} />
+              <button className="btn-primary" type="submit">
+                Restore client
+              </button>
+            </form>
+          ) : (
+            <form action={archiveClient}>
+              <input type="hidden" name="id" value={client.id} />
+              <button className="btn-ghost" type="submit">
+                Archive client
+              </button>
+            </form>
+          )}
+          <DeleteClientForm clientId={client.id} clientName={client.name} invoiceCount={invoiceCount} />
+        </div>
       </section>
 
       {/* Recent sessions */}
