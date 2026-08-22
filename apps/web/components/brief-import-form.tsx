@@ -53,7 +53,10 @@ export function BriefImportForm({
       setCurrency(res.currency || defaultCurrency);
       if (res.ratePerHour) setRate(String(res.ratePerHour));
       setWarnings(res.warnings);
-      setSourceText(String(fd.get('text') ?? ''));
+      // The server returns the text it actually parsed (paste, or extracted
+      // file contents) — read that instead of the paste textarea, which is
+      // empty for every file upload and would otherwise wipe sourceText.
+      setSourceText(res.sourceText ?? '');
       setRows(
         res.items.map((i) => ({
           section: i.section,
@@ -91,16 +94,10 @@ export function BriefImportForm({
     );
   }
 
-  const totals = rows.reduce(
-    (a, r) => ({
-      hoursLow: a.hoursLow + n(r.hoursLow),
-      hoursHigh: a.hoursHigh + n(r.hoursHigh),
-      amountLow: a.amountLow + n(r.amountLow),
-      amountHigh: a.amountHigh + n(r.amountHigh),
-    }),
-    { hoursLow: 0, hoursHigh: 0, amountLow: 0, amountHigh: 0 },
-  );
-
+  // items is the save set (blank-title rows dropped); totals is derived from
+  // it rather than from the raw rows so a blanked title visibly stops
+  // counting instead of still appearing in the numbers the user is asked to
+  // check against the estimate they sent the client.
   const items = rows
     .filter((r) => r.title.trim())
     .map((r) => ({
@@ -113,6 +110,16 @@ export function BriefImportForm({
       amountLow: n(r.amountLow),
       amountHigh: n(r.amountHigh),
     }));
+
+  const totals = items.reduce(
+    (a, r) => ({
+      hoursLow: a.hoursLow + r.hoursLow,
+      hoursHigh: a.hoursHigh + r.hoursHigh,
+      amountLow: a.amountLow + r.amountLow,
+      amountHigh: a.amountHigh + r.amountHigh,
+    }),
+    { hoursLow: 0, hoursHigh: 0, amountLow: 0, amountHigh: 0 },
+  );
 
   return (
     <form action={createBrief} className="card space-y-4">
@@ -188,16 +195,44 @@ export function BriefImportForm({
                   {r.section && <div className="mt-1 text-xs text-slate-500">{r.section}</div>}
                 </td>
                 <td className="py-1">
-                  <input className="input w-20 text-right" value={r.hoursLow} onChange={(e) => update(i, 'hoursLow', e.target.value)} />
+                  <input
+                    className="input w-20 text-right"
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={r.hoursLow}
+                    onChange={(e) => update(i, 'hoursLow', e.target.value)}
+                  />
                 </td>
                 <td className="py-1">
-                  <input className="input w-20 text-right" value={r.hoursHigh} onChange={(e) => update(i, 'hoursHigh', e.target.value)} />
+                  <input
+                    className="input w-20 text-right"
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={r.hoursHigh}
+                    onChange={(e) => update(i, 'hoursHigh', e.target.value)}
+                  />
                 </td>
                 <td className="py-1">
-                  <input className="input w-24 text-right" value={r.amountLow} onChange={(e) => update(i, 'amountLow', e.target.value)} />
+                  <input
+                    className="input w-24 text-right"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={r.amountLow}
+                    onChange={(e) => update(i, 'amountLow', e.target.value)}
+                  />
                 </td>
                 <td className="py-1">
-                  <input className="input w-24 text-right" value={r.amountHigh} onChange={(e) => update(i, 'amountHigh', e.target.value)} />
+                  <input
+                    className="input w-24 text-right"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={r.amountHigh}
+                    onChange={(e) => update(i, 'amountHigh', e.target.value)}
+                  />
                 </td>
                 <td className="py-1">
                   <button
@@ -214,7 +249,7 @@ export function BriefImportForm({
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-700 font-semibold">
-              <td className="pt-2">{rows.length} items</td>
+              <td className="pt-2">{items.length} items</td>
               <td className="pt-2 text-right">{totals.hoursLow}</td>
               <td className="pt-2 text-right">{totals.hoursHigh}</td>
               <td className="pt-2 text-right">{totals.amountLow}</td>
@@ -224,6 +259,19 @@ export function BriefImportForm({
           </tfoot>
         </table>
       </div>
+
+      <button
+        type="button"
+        className="btn-ghost"
+        onClick={() =>
+          setRows((rs) => [
+            ...(rs ?? []),
+            { section: '', title: '', hoursLow: '', hoursHigh: '', amountLow: '', amountHigh: '' },
+          ])
+        }
+      >
+        + Add row
+      </button>
 
       <p className="text-xs text-slate-500">
         Check these against the estimate you sent the client before saving — especially the totals.

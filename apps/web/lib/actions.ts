@@ -794,24 +794,35 @@ const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
  * Parse an uploaded or pasted estimate. Returns the parse for the user to
  * confirm — it never writes anything. `error` is set rather than thrown so the
  * form can show the problem beside the field instead of on an error page.
+ *
+ * `sourceText` carries back whatever text was actually handed to the parser
+ * (the paste, or the extracted file contents) so the caller can round-trip it
+ * into `createBrief` without trying to reconstruct it client-side — for an
+ * uploaded file there is no client-side copy of that text to reconstruct.
  */
-export async function parseBriefUpload(fd: FormData): Promise<ParsedBrief & { error?: string }> {
+export async function parseBriefUpload(
+  fd: FormData,
+): Promise<ParsedBrief & { error?: string; sourceText?: string }> {
   await requireOwner();
   const empty: ParsedBrief = { title: '', currency: 'GBP', ratePerHour: 0, items: [], warnings: [] };
   // A parse with no items leaves the user staring at an empty table with no
   // explanation, so every parsing path — paste and every file type — goes
   // through this guard rather than returning the empty ParsedBrief bare.
-  const withGuard = (p: ParsedBrief): ParsedBrief & { error?: string } =>
+  const withGuard = (
+    p: ParsedBrief,
+    sourceText: string,
+  ): ParsedBrief & { error?: string; sourceText?: string } =>
     p.items.length === 0
       ? {
           ...p,
+          sourceText,
           error: 'No work items found. Check the estimate has rows with hours and a cost, or paste the text and edit it by hand.',
         }
-      : p;
+      : { ...p, sourceText };
 
   try {
     const pasted = str(fd, 'text');
-    if (pasted) return withGuard(parseBriefText(pasted));
+    if (pasted) return withGuard(parseBriefText(pasted), pasted);
 
     const file = fd.get('file');
     if (!(file instanceof File) || file.size === 0) {
@@ -823,10 +834,12 @@ export async function parseBriefUpload(fd: FormData): Promise<ParsedBrief & { er
 
     const name = file.name.toLowerCase();
     if (name.endsWith('.docx')) {
-      return withGuard(parseBriefText(await extractDocxText(await file.arrayBuffer())));
+      const text = await extractDocxText(await file.arrayBuffer());
+      return withGuard(parseBriefText(text), text);
     }
     if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv')) {
-      return withGuard(parseBriefText(await file.text()));
+      const text = await file.text();
+      return withGuard(parseBriefText(text), text);
     }
     return {
       ...empty,
@@ -860,6 +873,11 @@ export async function createBrief(fd: FormData): Promise<void> {
   if (!clientId) throw new Error('Pick a client');
   const title = str(fd, 'title') || 'Untitled brief';
 
+  // A form is not a security boundary — the estimate fields are free-text
+  // inputs client-side, so a negative here is clamped to 0 rather than
+  // trusted, whatever the browser did or didn't validate.
+  const nonNeg = (v: unknown): number => Math.max(0, Number(v) || 0);
+
   let items: BriefItemInput[] = [];
   try {
     const parsed = JSON.parse(str(fd, 'items') || '[]') as unknown;
@@ -870,11 +888,11 @@ export async function createBrief(fd: FormData): Promise<void> {
           section: String(row.section ?? '').trim(),
           title: String(row.title ?? '').trim(),
           deliverable: String(row.deliverable ?? '').trim(),
-          amount: Number(row.amount) || 0,
-          hoursLow: Number(row.hoursLow) || 0,
-          hoursHigh: Number(row.hoursHigh) || 0,
-          amountLow: Number(row.amountLow) || 0,
-          amountHigh: Number(row.amountHigh) || 0,
+          amount: nonNeg(row.amount),
+          hoursLow: nonNeg(row.hoursLow),
+          hoursHigh: nonNeg(row.hoursHigh),
+          amountLow: nonNeg(row.amountLow),
+          amountHigh: nonNeg(row.amountHigh),
         };
       })
       .filter((r) => r.title);
