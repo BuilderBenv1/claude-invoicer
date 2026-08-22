@@ -307,6 +307,8 @@ milestones(
   key             text not null,          -- short stable id written into MILESTONES.md
   title           text not null,
   deliverable     text,
+  /** Fixed-price briefs only: the agreed price for this milestone. T&M briefs
+      leave this 0 and bill tracked time instead. */
   amount          double precision not null default 0,
   estimate_hours_low  double precision not null default 0,
   estimate_hours_high double precision not null default 0,
@@ -324,11 +326,14 @@ unique index invoices_milestone_unique   on invoices(milestone_id) where milesto
 ```
 
 **Milestone state machine.** `pending → ready` when the agent reports the box
-ticked. From `ready`, a *fixed-price* brief goes to `invoiced` once the hold
-window elapses; a *time & materials* brief goes straight to `done` (terminal, no
-invoice — it only records progress). `invoiced` and `done` are both terminal:
-later file states for that key are ignored, so unticking a box never reverses
-anything. Cancelling a `ready` milestone returns it to `pending`.
+ticked. From `ready`, both modes go to `invoiced` once the hold window elapses —
+a *fixed-price* milestone bills its agreed `amount`, a *time & materials* one
+bills the hours tracked in `(billed_through_ms, cutoff]` at the client's rate
+(see D5). A T&M milestone with **no tracked time** in its window has nothing to
+bill and goes to `done` instead, which is terminal and carries no invoice.
+`invoiced` and `done` are both terminal: later file states for that key are
+ignored, so unticking a box never reverses anything. Cancelling a `ready`
+milestone returns it to `pending`.
 
 `folder_mappings` gains `billing_mode text not null default 'time'`.
 
