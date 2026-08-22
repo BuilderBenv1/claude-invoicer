@@ -67,3 +67,28 @@ describe('invoiceCountFor', () => {
     expect(invoiceCountFor(rows, 'c1')).toBe(1);
   });
 });
+
+describe('billedWeekStarts and non-week documents', () => {
+  // Milestone and manual invoices carry prevBilledThroughMs = -1 so they stay
+  // out of the week namespace. If either ever stored a real window start, a
+  // value colliding with a week boundary would mark that week billed and the
+  // week would silently never be invoiced.
+  it('a -1 document never marks a real week as billed', () => {
+    const weekStart = Date.UTC(2026, 5, 8);
+    const rows = [
+      { clientId: 'c1', docType: 'invoice', prevBilledThroughMs: -1 },
+      { clientId: 'c1', docType: 'invoice', prevBilledThroughMs: weekStart },
+    ];
+    const billed = billedWeekStarts(rows, 'c1');
+    expect(billed.has(weekStart)).toBe(true);
+    expect(billed.has(-1)).toBe(true);
+    // -1 is not a week start, so no real week is affected by it.
+    expect([...billed].filter((n) => n >= 0)).toEqual([weekStart]);
+  });
+
+  it('only the owning client is affected', () => {
+    const weekStart = Date.UTC(2026, 5, 8);
+    const rows = [{ clientId: 'c1', docType: 'invoice', prevBilledThroughMs: weekStart }];
+    expect(billedWeekStarts(rows, 'c2').has(weekStart)).toBe(false);
+  });
+});

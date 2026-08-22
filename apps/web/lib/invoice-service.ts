@@ -362,15 +362,26 @@ export async function issueMilestoneInvoice(milestoneId: string): Promise<Milest
 
       const cutoffMs = Date.now();
       let lines: NewLine[];
-      let prevBilledThroughMs: number;
+
+      /**
+       * A milestone invoice is never a week invoice, so it stays out of the
+       * week namespace entirely — the same -1 convention manual documents use.
+       *
+       * This is not cosmetic. `invoices_client_week_unique` is a PARTIAL index
+       * over (client_id, prev_billed_through_ms) WHERE prev_billed_through_ms
+       * >= 0, so storing a real window start would make two briefs' first
+       * milestones collide on (client, 0). Worse, core's `billedWeekStarts`
+       * adds prev_billed_through_ms for every billing-evidence row with no
+       * >= 0 filter, so a window start that ever coincided with a week
+       * boundary would mark that week billed and it would never be invoiced.
+       * The real window lives on the milestone rows (billed_through_ms), which
+       * is what issueMilestoneInvoice actually reads.
+       */
+      const prevBilledThroughMs = -1;
 
       if (brief.billingMode === 'fixed') {
         if (m.amount <= 0) return { ok: false, reason: 'no-amount' };
         lines = [{ label: m.title, hours: 0, ratePerHour: 0, amount: round2(m.amount) }];
-        // A fixed-price milestone bills an agreed sum, not a time window. -1
-        // marks "not a week invoice", exactly as the manual-document path does,
-        // which keeps invoiceDayGrid from trying to rebuild a grid for it.
-        prevBilledThroughMs = -1;
       } else {
         const [prevRow] = await tx
           .select({ prev: max(milestones.billedThroughMs) })
@@ -424,7 +435,6 @@ export async function issueMilestoneInvoice(milestoneId: string): Promise<Milest
           ratePerHour: l.ratePerHour,
           amount: l.amount,
         }));
-        prevBilledThroughMs = windowStart;
       }
 
       const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
