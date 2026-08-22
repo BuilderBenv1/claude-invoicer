@@ -101,6 +101,42 @@ describe('parseBriefText — aggregate-word titles must survive', () => {
       'Area of focus: mobile app',
     ]);
   });
+
+  it('still counts real items whose titles merely start with an aggregate word, alongside decorated aggregate cells', () => {
+    const r = parseBriefText(
+      [
+        'A\t1 hr\t$30',
+        'Subtotal:\t1 hr\t$30',
+        'Sub-total\t1 hr\t$30',
+        'TOTAL.\t1 hr\t$30',
+        'Total infrastructure overhaul\t5 hrs\t$150',
+        'Overall system redesign\t10 hrs\t$300',
+      ].join('\n'),
+    );
+    expect(r.items.map((i) => i.title)).toEqual([
+      'A',
+      'Total infrastructure overhaul',
+      'Overall system redesign',
+    ]);
+    const joined = r.warnings.join(' ');
+    expect(joined).toMatch(/Subtotal:/);
+    expect(joined).toMatch(/Sub-total/);
+    expect(joined).toMatch(/TOTAL\./);
+  });
+});
+
+describe('parseBriefText — unreadable table rows are reported, not dropped', () => {
+  it('warns when a two-cell (or more) row has no readable hours or cost, instead of vanishing', () => {
+    const r = parseBriefText('Design the thing\tTBC\tTBC');
+    expect(r.items).toHaveLength(0);
+    expect(r.warnings.join(' ')).toMatch(/couldn't read hours or a cost for: design the thing/i);
+  });
+
+  it('does not warn about a prose line with no tabs — it was never a table row', () => {
+    const r = parseBriefText('This estimate is valid for 30 days from 11 August 2026.');
+    expect(r.items).toHaveLength(0);
+    expect(r.warnings.join(' ')).not.toMatch(/couldn't read hours or a cost/i);
+  });
 });
 
 describe('parseBriefText — half-parsed rows are flagged, not silently zeroed', () => {

@@ -22,9 +22,11 @@ const DASH = '[\\u2013\\u2014-]';
 const SYMBOL_CURRENCY: [string, string][] = [['£', 'GBP'], ['$', 'USD'], ['€', 'EUR']];
 
 /** A cell that restates other rows rather than describing work of its own.
- *  Matched exactly: these are header and subtotal CELLS, so a real work item
- *  titled "Total infrastructure overhaul" must survive. */
-const AGGREGATE_ROW = /^(?:(?:sub)?total|overall|area|work|hours|estimated\s+(?:time|cost))$/i;
+ *  Matched exactly against a normalised (lower-cased, punctuation-stripped)
+ *  title: these are header and subtotal CELLS, so a real work item titled
+ *  "Total infrastructure overhaul" must survive. Matching a prefix instead of
+ *  the whole cell is what wrongly ate that title once before. */
+const AGGREGATE_ROW = /^(?:(?:sub\s?)?total|overall|area|work|hours|estimated\s+(?:time|cost))$/i;
 /** A heading after which everything restates what came before. */
 const SUMMARY_HEADING = /^(overall estimate|summary)\b/i;
 /** "1. Moving to the Free + Pro Plans" */
@@ -89,6 +91,7 @@ export function parseBriefText(text: string): ParsedBrief {
   let proseHours: { low: number; high: number } | null = null;
   let proseMoney: { low: number; high: number } | null = null;
   const skipped: string[] = [];
+  const unreadable: string[] = [];
 
   // Turn whatever prose figures were accumulated for the current section into
   // a work item, called whenever that section ends (a new heading, a summary,
@@ -164,7 +167,8 @@ export function parseBriefText(text: string): ParsedBrief {
     const title = cells[0] ?? '';
     if (!title) continue;
 
-    if (AGGREGATE_ROW.test(title)) {
+    const cleaned = title.toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (AGGREGATE_ROW.test(cleaned)) {
       skipped.push(title);
       continue;
     }
@@ -174,7 +178,13 @@ export function parseBriefText(text: string): ParsedBrief {
     const rest = cells.slice(1).join(' ');
     const hours = hoursRange(rest);
     const money = moneyRange(rest);
-    if (!hours && !money) continue;
+    if (!hours && !money) {
+      // A row with 2+ cells was still a table row — its figures just didn't
+      // parse. That's under-billing if it silently vanishes, so it's reported
+      // instead of dropped. A single-cell line (no tab) is prose, not a row.
+      if (cells.length >= 2) unreadable.push(title);
+      continue;
+    }
 
     if (!out.currency) {
       for (const [sym, code] of SYMBOL_CURRENCY) {
@@ -205,6 +215,13 @@ export function parseBriefText(text: string): ParsedBrief {
     const more = skipped.length > 8 ? ` and ${skipped.length - 8} more` : '';
     out.warnings.push(
       `Skipped ${skipped.length} subtotal or header row${skipped.length === 1 ? '' : 's'} (${shown}${more}) — counting them would double the total.`,
+    );
+  }
+  if (unreadable.length > 0) {
+    const shown = unreadable.slice(0, 8).join(', ');
+    const more = unreadable.length > 8 ? ` and ${unreadable.length - 8} more` : '';
+    out.warnings.push(
+      `Couldn't read hours or a cost for: ${shown}${more} — add them by hand or delete the rows.`,
     );
   }
   if (!out.currency) out.currency = 'GBP';
