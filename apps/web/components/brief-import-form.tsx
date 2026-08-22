@@ -199,7 +199,7 @@ export function BriefImportForm({
                     className="input w-20 text-right"
                     type="number"
                     min="0"
-                    step="0.25"
+                    step="0.01"
                     value={r.hoursLow}
                     onChange={(e) => update(i, 'hoursLow', e.target.value)}
                   />
@@ -209,7 +209,7 @@ export function BriefImportForm({
                     className="input w-20 text-right"
                     type="number"
                     min="0"
-                    step="0.25"
+                    step="0.01"
                     value={r.hoursHigh}
                     onChange={(e) => update(i, 'hoursHigh', e.target.value)}
                   />
