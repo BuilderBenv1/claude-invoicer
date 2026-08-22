@@ -29,6 +29,12 @@ const AGGREGATE_ROW = /^(?:(?:sub)?total|overall|area|work|hours|estimated\s+(?:
 const SUMMARY_HEADING = /^(overall estimate|summary)\b/i;
 /** "1. Moving to the Free + Pro Plans" */
 const SECTION_HEADING = /^\d+\.\s+\S/;
+/** A section costed in two sentences instead of a table row — "Estimated
+ *  time: 2-4 hours" / "Estimated cost: $60-$120" under a heading, with no
+ *  `w:tbl` behind it at all. Recognised so the item isn't silently dropped
+ *  by the tab-shaped row check below. */
+const PROSE_TIME = /^estimated\s+time\s*:/i;
+const PROSE_COST = /^estimated\s+cost\s*:/i;
 
 function num(raw: string): number {
   return round2(Number(raw.replace(/,/g, '')));
@@ -68,12 +74,47 @@ function moneyRange(text: string): { low: number; high: number } | null {
  * restates everything. Counting a subtotal as work would double the money, so
  * aggregate rows and everything after a summary heading are skipped — and every
  * skip is reported rather than dropped.
+ *
+ * Not every section is a table, though: one might be costed in two sentences
+ * ("Estimated time: 2-4 hours" / "Estimated cost: $60-$120") instead. Those
+ * figures are accumulated against the current section heading and turned into
+ * one item when the section ends — unless that section already produced a
+ * table item, in which case the prose is a restatement of it, not new work.
  */
 export function parseBriefText(text: string): ParsedBrief {
   const out: ParsedBrief = { title: '', currency: '', ratePerHour: 0, items: [], warnings: [] };
   let section = '';
   let inSummary = false;
+  let sectionHasTableItem = false;
+  let proseHours: { low: number; high: number } | null = null;
+  let proseMoney: { low: number; high: number } | null = null;
   const skipped: string[] = [];
+
+  // Turn whatever prose figures were accumulated for the current section into
+  // a work item, called whenever that section ends (a new heading, a summary,
+  // or the end of the document).
+  const flushProse = () => {
+    if (!proseHours && !proseMoney) return;
+    if (sectionHasTableItem) {
+      out.warnings.push(
+        `Ignored the prose total for "${section}" — a table for this section already counted its work.`,
+      );
+    } else {
+      const title = section.replace(/^\d+\.\s+/, '').trim() || section;
+      if (!proseHours) out.warnings.push(`No hours found for "${title}" — check it against the estimate.`);
+      if (!proseMoney) out.warnings.push(`No cost found for "${title}" — check it against the estimate.`);
+      out.items.push({
+        section,
+        title,
+        hoursLow: proseHours?.low ?? 0,
+        hoursHigh: proseHours?.high ?? 0,
+        amountLow: proseMoney?.low ?? 0,
+        amountHigh: proseMoney?.high ?? 0,
+      });
+    }
+    proseHours = null;
+    proseMoney = null;
+  };
 
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -84,6 +125,7 @@ export function parseBriefText(text: string): ParsedBrief {
     if (rate && !out.ratePerHour) out.ratePerHour = num(rate[1]!);
 
     if (SUMMARY_HEADING.test(line)) {
+      flushProse();
       inSummary = true;
       out.warnings.push(
         `Ignored everything from "${line}" onwards — a summary restates rows already counted.`,
@@ -93,7 +135,28 @@ export function parseBriefText(text: string): ParsedBrief {
     if (inSummary) continue;
 
     if (SECTION_HEADING.test(line) && !line.includes('\t')) {
+      flushProse();
       section = line;
+      sectionHasTableItem = false;
+      continue;
+    }
+
+    if (!line.includes('\t') && PROSE_TIME.test(line)) {
+      const hours = hoursRange(line);
+      if (hours) proseHours = hours;
+      continue;
+    }
+    if (!line.includes('\t') && PROSE_COST.test(line)) {
+      const money = moneyRange(line);
+      if (money) proseMoney = money;
+      if (!out.currency) {
+        for (const [sym, code] of SYMBOL_CURRENCY) {
+          if (line.includes(sym)) {
+            out.currency = code;
+            break;
+          }
+        }
+      }
       continue;
     }
 
@@ -133,7 +196,9 @@ export function parseBriefText(text: string): ParsedBrief {
       amountLow: money?.low ?? 0,
       amountHigh: money?.high ?? 0,
     });
+    sectionHasTableItem = true;
   }
+  flushProse();
 
   if (skipped.length > 0) {
     const shown = skipped.slice(0, 8).join(', ');

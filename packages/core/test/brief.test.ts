@@ -128,6 +128,41 @@ describe('parseBriefText — the skip warning names what it skipped', () => {
   });
 });
 
+describe('parseBriefText — a section costed in prose', () => {
+  const doc = [
+    '1. Build it',
+    'A\t2 hrs\t$60',
+    '4. Testing & Launch',
+    "Once everything is built, I'll test the main journeys.",
+    'Estimated time: 2-4 hours',
+    'Estimated cost: $60-$120',
+  ].join('\n');
+
+  it('counts a prose-costed section as a work item', () => {
+    const r = parseBriefText(doc);
+    expect(r.items).toHaveLength(2);
+  });
+  it('titles it from the section heading, without the number', () => {
+    const item = parseBriefText(doc).items[1]!;
+    expect(item.title).toBe('Testing & Launch');
+    expect(item.section).toBe('4. Testing & Launch');
+  });
+  it('reads both figures from the prose', () => {
+    expect(parseBriefText(doc).items[1]).toMatchObject({
+      hoursLow: 2, hoursHigh: 4, amountLow: 60, amountHigh: 120,
+    });
+  });
+  it('does not invent an item from a heading with no figures', () => {
+    expect(parseBriefText('1. Just a heading\nSome prose about it.').items).toHaveLength(0);
+  });
+  it('does not double-count a section that has BOTH a table and prose totals', () => {
+    const both = ['1. Work', 'A\t2 hrs\t$60', 'Estimated time: 2 hours', 'Estimated cost: $60'].join('\n');
+    const r = parseBriefText(both);
+    expect(r.items).toHaveLength(1);
+    expect(r.warnings.join(' ')).toMatch(/prose|total/i);
+  });
+});
+
 describe('parseBriefText — a real client estimate', () => {
   const text = readFileSync(
     fileURLToPath(new URL('./fixtures/story-to-tell-estimate.txt', import.meta.url)),
