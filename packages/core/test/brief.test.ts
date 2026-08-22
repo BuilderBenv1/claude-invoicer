@@ -1,0 +1,83 @@
+import { describe, it, expect } from 'vitest';
+import { parseBriefText } from '../src/brief.js';
+
+describe('parseBriefText — money and ranges', () => {
+  it('reads a tab-delimited row with an hours range and a cost range', () => {
+    const r = parseBriefText('Build the API\t2-3 hrs\t$60-$90');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({
+      title: 'Build the API',
+      hoursLow: 2,
+      hoursHigh: 3,
+      amountLow: 60,
+      amountHigh: 90,
+    });
+  });
+  it('treats a single figure as both ends of the range', () => {
+    const r = parseBriefText('Fixed piece\t4 hrs\t$120');
+    expect(r.items[0]).toMatchObject({ hoursLow: 4, hoursHigh: 4, amountLow: 120, amountHigh: 120 });
+  });
+  it('accepts en dash, em dash, hyphen and "to" as range separators', () => {
+    for (const sep of ['–', '—', '-', ' to ']) {
+      const r = parseBriefText(`Item\t2${sep}3 hrs\t$60${sep}$90`);
+      expect(r.items[0], sep).toMatchObject({ hoursLow: 2, hoursHigh: 3, amountLow: 60, amountHigh: 90 });
+    }
+  });
+  it('reads fractional hours', () => {
+    expect(parseBriefText('Small job\t0.5-1 hr\t$15-$30').items[0]).toMatchObject({ hoursLow: 0.5, hoursHigh: 1 });
+  });
+  it('strips thousands separators from money', () => {
+    expect(parseBriefText('Big job\t40 hrs\t$1,200').items[0]!.amountLow).toBe(1200);
+  });
+  it('detects the currency from the first symbol seen', () => {
+    expect(parseBriefText('A\t1 hr\t£50').currency).toBe('GBP');
+    expect(parseBriefText('A\t1 hr\t$50').currency).toBe('USD');
+    expect(parseBriefText('A\t1 hr\t€50').currency).toBe('EUR');
+  });
+  it('defaults the currency to GBP when no symbol appears', () => {
+    expect(parseBriefText('A\t1 hr\t50').currency).toBe('GBP');
+  });
+});
+
+describe('parseBriefText — structure', () => {
+  it('picks up an hourly rate stated once', () => {
+    expect(parseBriefText('Rate: $30/hr\nA\t1 hr\t$30').ratePerHour).toBe(30);
+    expect(parseBriefText('Rate: £45 per hour\nA\t1 hr\t£45').ratePerHour).toBe(45);
+  });
+  it('assigns items to the numbered section above them', () => {
+    const r = parseBriefText('1. Setup\nA\t1 hr\t$30\n2. Build\nB\t2 hrs\t$60');
+    expect(r.items.map((i) => i.section)).toEqual(['1. Setup', '2. Build']);
+  });
+  it('takes the title from the first non-empty line', () => {
+    expect(parseBriefText('A STORY TO TELL\nWork Estimate\nA\t1 hr\t$30').title).toBe('A STORY TO TELL');
+  });
+});
+
+describe('parseBriefText — what it must NOT count', () => {
+  it('skips subtotal rows and says so', () => {
+    const r = parseBriefText('A\t1 hr\t$30\nSubtotal\t1 hr\t$30');
+    expect(r.items).toHaveLength(1);
+    expect(r.warnings.join(' ')).toMatch(/subtotal/i);
+  });
+  it('skips a table header row', () => {
+    const r = parseBriefText('Work\tEstimated time\tEstimated cost\nA\t1 hr\t$30');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]!.title).toBe('A');
+  });
+  it('skips everything after an Overall Estimate heading', () => {
+    const r = parseBriefText('1. Work\nA\t1 hr\t$30\nOverall Estimate\nArea\tHours\tCost\nWork\t1\t$30');
+    expect(r.items).toHaveLength(1);
+    expect(r.warnings.join(' ')).toMatch(/summary|overall/i);
+  });
+  it('ignores prose that merely mentions a number', () => {
+    expect(parseBriefText('This estimate is valid for 30 days from 11 August 2026.').items).toHaveLength(0);
+  });
+  it('requires an amount or a duration, not just any text', () => {
+    expect(parseBriefText('Some heading\nJust a sentence about the work.').items).toHaveLength(0);
+  });
+  it('returns an empty result rather than throwing on empty input', () => {
+    const r = parseBriefText('');
+    expect(r.items).toEqual([]);
+    expect(r.title).toBe('');
+  });
+});
