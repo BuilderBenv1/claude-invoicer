@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getClientDetail } from '@/lib/queries';
+import { getClientDetail, listBriefs } from '@/lib/queries';
 import { formatDuration, formatMoney, formatDate, formatDateTime } from '@/lib/format';
 import {
   updateClient,
@@ -18,12 +18,13 @@ import {
 import { BillFromForm } from '@/components/bill-from-form';
 import { CurrencySelect } from '@/components/currency-select';
 import { DeleteClientForm } from '@/components/delete-client-form';
+import { BriefImportForm } from '@/components/brief-import-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const detail = await getClientDetail(id);
+  const [detail, briefList] = await Promise.all([getClientDetail(id), listBriefs(id)]);
   if (!detail) notFound();
 
   const { client, mappings, weeks, oneOffs, oneOffTotal, recentIntervals, settings, roundIncrementMin, currentWeekKey, invoiceCount } = detail;
@@ -278,6 +279,38 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             <button className="btn-ghost" type="submit">Add charge</button>
           </form>
         </div>
+      </section>
+
+      {/* Briefs */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Briefs</h2>
+        <p className="text-xs text-slate-500">
+          A costed piece of work to bill against. Upload the estimate you sent the client, or paste it in.
+        </p>
+        {briefList.length > 0 && (
+          <div className="space-y-2">
+            {briefList.map((b) => (
+              <div key={b.brief.id} className="card flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <Link href={`/briefs/${b.brief.id}`} className="font-medium hover:underline">
+                    {b.brief.title}
+                  </Link>
+                  <div className="text-xs text-slate-500">
+                    {b.milestoneCount} items · {b.hoursLow}–{b.hoursHigh} hrs ·{' '}
+                    {formatMoney(b.amountLow, b.brief.currency)}–{formatMoney(b.amountHigh, b.brief.currency)} ·{' '}
+                    {b.brief.billingMode === 'fixed' ? 'fixed price' : 'time & materials'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <BriefImportForm
+          clientId={client.id}
+          defaultCurrency={client.currency}
+          defaultRate={client.hourlyRate}
+          folders={mappings.map((m) => ({ id: m.id, label: m.label ?? m.path }))}
+        />
       </section>
 
       {/* Settings */}
