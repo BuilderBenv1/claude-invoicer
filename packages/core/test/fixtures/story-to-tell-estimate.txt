@@ -1,0 +1,33 @@
+A STORY TO TELL
+Work Estimate - Free/Pro Migration, New Features & Homepage Rebuild
+Prepared by Ben Horne - 11 August 2026 - Rate: $30/hr
+1. Moving to the Free + Pro Plans
+Work	Estimated time	Estimated cost
+Remove the Basic plan, update Stripe and the pricing page	2-3 hrs	$60-$90
+Set the Free/Pro rules throughout the app	8-12 hrs	$240-$360
+Add the delete option without letting it bypass Free limits	3-4 hrs	$90-$120
+Set storage limits for Free and Pro	2-3 hrs	$60-$90
+Subtotal	15-22 hrs	$450-$660
+2. New Pro Features
+Work	Estimated time	Estimated cost
+AI Story Captions - automatically create captions for photos	6-8 hrs	$180-$240
+Memory Audio - upload, save and play audio alongside a memory	6-8 hrs	$180-$240
+Memory Clips - upload, process and play short 10-20 second videos	10-16 hrs	$300-$480
+Subtotal	22-32 hrs	$660-$960
+3. Homepage Rebuild
+Work	Estimated time	Estimated cost
+New hero section, headline, copy and layout	2-3 hrs	$60-$90
+Start Your Story button and Free/Pro journey	2-3 hrs	$60-$90
+Simple Upload, Create, Share guide	2-3 hrs	$60-$90
+Remove the existing sections that are no longer needed	2-3 hrs	$60-$90
+Update the contact email and contact flow	0.5-1 hr	$15-$30
+Subtotal	8.5-13 hrs	$255-$390
+4. Testing & Launch
+Test the main Free and Pro journeys before deployment	2-4 hrs	$60-$120
+Overall Estimate
+Area	Hours	Estimated cost
+Free + Pro subscription changes	15-22	$450-$660
+New Pro features	22-32	$660-$960
+Homepage rebuild	8.5-13	$255-$390
+Testing and launch	2-4	$60-$120
+This estimate is valid for 30 days from 11 August 2026.

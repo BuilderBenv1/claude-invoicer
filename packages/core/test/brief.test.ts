@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseBriefText } from '../src/brief.js';
 
 describe('parseBriefText — money and ranges', () => {
@@ -123,5 +125,40 @@ describe('parseBriefText — the skip warning names what it skipped', () => {
     const joined = r.warnings.join(' ');
     expect(joined).toMatch(/Subtotal/);
     expect(joined).toMatch(/Work/);
+  });
+});
+
+describe('parseBriefText — a real client estimate', () => {
+  const text = readFileSync(
+    fileURLToPath(new URL('./fixtures/story-to-tell-estimate.txt', import.meta.url)),
+    'utf8',
+  );
+  const parsed = parseBriefText(text);
+
+  it('finds every work item and no subtotal or summary row', () => {
+    expect(parsed.items).toHaveLength(13);
+  });
+  it('does not double-count: the money matches the sum of the sections', () => {
+    expect(parsed.items.reduce((s, i) => s + i.amountLow, 0)).toBe(1425);
+    expect(parsed.items.reduce((s, i) => s + i.amountHigh, 0)).toBe(2130);
+  });
+  it('totals the hours across all four sections', () => {
+    expect(parsed.items.reduce((s, i) => s + i.hoursLow, 0)).toBeCloseTo(47.5, 5);
+    expect(parsed.items.reduce((s, i) => s + i.hoursHigh, 0)).toBeCloseTo(71, 5);
+  });
+  it('groups the items under their four sections', () => {
+    const sections = [...new Set(parsed.items.map((i) => i.section))];
+    expect(sections).toHaveLength(4);
+    expect(sections[0]).toMatch(/Free \+ Pro/);
+  });
+  it('reads the rate and currency from the document', () => {
+    expect(parsed.ratePerHour).toBe(30);
+    expect(parsed.currency).toBe('USD');
+  });
+  it('reports what it skipped rather than dropping it silently', () => {
+    expect(parsed.warnings.join(' ')).toMatch(/subtotal|summary|overall/i);
+  });
+  it('takes the document title from its first line', () => {
+    expect(parsed.title).toBe('A STORY TO TELL');
   });
 });
