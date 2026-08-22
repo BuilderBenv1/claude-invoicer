@@ -199,6 +199,25 @@ describe('parseBriefText — a section costed in prose', () => {
   });
 });
 
+// fixtures/story-to-tell-estimate.txt is GENERATED OUTPUT, not hand-written —
+// it is the verbatim result of extractDocxText() run against the client's
+// actual .docx estimate, so this suite exercises exactly what the app's
+// parser sees (en dashes, curly quotes, prose sections and all), not a
+// simplified transcription of it. Regenerate it whenever docx.ts's extraction
+// changes:
+//
+//   cd "<repo root>" && cat > ./regen.mjs <<'EOF'
+//   import { readFileSync, writeFileSync } from 'node:fs';
+//   const { extractDocxText } = await import('./apps/web/lib/docx.ts');
+//   const b = readFileSync('<path to the .docx>');
+//   const text = await extractDocxText(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+//   writeFileSync('./packages/core/test/fixtures/story-to-tell-estimate.txt', text, 'utf8');
+//   EOF
+//   npx tsx ./regen.mjs; rm -f ./regen.mjs
+//
+// If the assertions below ever fail after a regeneration, that's the parser
+// disagreeing with a document it used to read correctly — fix the parser,
+// don't adjust the expected numbers to match.
 describe('parseBriefText — a real client estimate', () => {
   const text = readFileSync(
     fileURLToPath(new URL('./fixtures/story-to-tell-estimate.txt', import.meta.url)),

@@ -1,33 +1,78 @@
 A STORY TO TELL
-Work Estimate - Free/Pro Migration, New Features & Homepage Rebuild
-Prepared by Ben Horne - 11 August 2026 - Rate: $30/hr
+Work Estimate — Free/Pro Migration, New Features & Homepage Rebuild
+Prepared by Ben Horne  •  11 August 2026  •  Rate: $30/hr
+I've broken the work below into a few clear areas so you can see what needs to be changed, roughly how long each part should take, and where there are still a couple of decisions to make.
+The figures are ranges rather than fixed numbers at this stage. Once the two open questions at the end are confirmed, I should be able to tighten these up further.
 1. Moving to the Free + Pro Plans
+The first part is simplifying the current subscription setup so that there are just two options: Free and Pro.
 Work	Estimated time	Estimated cost
-Remove the Basic plan, update Stripe and the pricing page	2-3 hrs	$60-$90
-Set the Free/Pro rules throughout the app	8-12 hrs	$240-$360
-Add the delete option without letting it bypass Free limits	3-4 hrs	$90-$120
-Set storage limits for Free and Pro	2-3 hrs	$60-$90
-Subtotal	15-22 hrs	$450-$660
+Remove the Basic plan, update Stripe and the pricing page	2–3 hrs	$60–$90
+Set the Free/Pro rules throughout the app	8–12 hrs	$240–$360
+Add the delete option while making sure it can't be used to get around Free limits	3–4 hrs	$90–$120
+Set storage limits for Free and Pro	2–3 hrs	$60–$90
+Subtotal	15–22 hrs	$450–$660
+The main variable here is making sure the new Free and Pro limits work consistently throughout the app, rather than just changing what's shown on the pricing page.
 2. New Pro Features
+This covers the three new types of content being added for Pro users.
 Work	Estimated time	Estimated cost
-AI Story Captions - automatically create captions for photos	6-8 hrs	$180-$240
-Memory Audio - upload, save and play audio alongside a memory	6-8 hrs	$180-$240
-Memory Clips - upload, process and play short 10-20 second videos	10-16 hrs	$300-$480
-Subtotal	22-32 hrs	$660-$960
+AI Story Captions — automatically create captions for photos, with an upgrade prompt for Free users	6–8 hrs	$180–$240
+Memory Audio — upload, save and play audio alongside a memory	6–8 hrs	$180–$240
+Memory Clips — upload, process and play short 10–20 second videos	10–16 hrs	$300–$480
+Subtotal	22–32 hrs	$660–$960
+The video estimate has a slightly wider range because the final approach to processing the videos will affect how much work is involved.
+For the AI captions, I'm assuming we use a cost-effective AI model rather than anything unnecessarily expensive. At the expected level of usage, the ongoing AI cost should be very small.
 3. Homepage Rebuild
+The homepage will be updated to better match the new Free/Pro journey and make the next step clearer for visitors.
 Work	Estimated time	Estimated cost
-New hero section, headline, copy and layout	2-3 hrs	$60-$90
-Start Your Story button and Free/Pro journey	2-3 hrs	$60-$90
-Simple Upload, Create, Share guide	2-3 hrs	$60-$90
-Remove the existing sections that are no longer needed	2-3 hrs	$60-$90
-Update the contact email and contact flow	0.5-1 hr	$15-$30
-Subtotal	8.5-13 hrs	$255-$390
+New hero section, headline, copy and layout	2–3 hrs	$60–$90
+“Start Your Story” button and Free/Pro journey	2–3 hrs	$60–$90
+Simple “Upload → Create → Share” guide	2–3 hrs	$60–$90
+Remove the existing sections that are no longer needed	2–3 hrs	$60–$90
+Update the contact email and contact flow	0.5–1 hr	$15–$30
+Subtotal	8.5–13 hrs	$255–$390
+This estimate covers building the page using the new design/content. The new hero image itself would be supplied separately, as discussed.
 4. Testing & Launch
-Test the main Free and Pro journeys before deployment	2-4 hrs	$60-$120
+Once everything is built, I'll test the main Free and Pro journeys, check the new features, and make sure everything is working correctly before deployment.
+Estimated time: 2–4 hours
+Estimated cost: $60–$120
 Overall Estimate
 Area	Hours	Estimated cost
-Free + Pro subscription changes	15-22	$450-$660
-New Pro features	22-32	$660-$960
-Homepage rebuild	8.5-13	$255-$390
-Testing and launch	2-4	$60-$120
+Free + Pro subscription changes	15–22	$450–$660
+New Pro features	22–32	$660–$960
+Homepage rebuild	8.5–13	$255–$390
+Testing & launch	2–4	$60–$120
+Total	~48–71 hrs	~$1,440–$2,130
+One Extra Feature to Decide On
+There's one part of the brief that I haven't included in the main estimate yet:
+“Try Before You Join”
+The idea of allowing someone to create their first memory without creating an account, then saving that work when they sign up, is a little more involved than simply adding some wording to the homepage.
+It means the temporary work needs to be saved safely, and then transferred to the new account when the person signs up.
+I'd estimate this at:
+8–12 hours / $240–$360
+If you decide to include it, the overall project would therefore be approximately:
+56–83 hours / $1,680–$2,490
+Two Things to Confirm
+There are two decisions that would help me tighten the estimate before starting:
+1. What happens to existing Basic subscribers?
+When the Basic plan is removed, should existing customers:
+Stay on their current price/plan?
+Be moved to Pro?
+Be handled another way?
+This is mainly a business decision, but it affects whether we need to build anything specifically for existing customers.
+2. What does “Premium Templates” mean?
+If this simply means making the existing templates available to Pro users only, that's already covered above.
+If you want new templates designed specifically for Pro, that would be additional design and development work.
+A Few Assumptions
+I've based the estimate on the following:
+Videos will use Cloudflare Stream to handle the processing rather than building our own video-processing system. This keeps the initial build simpler and quicker.
+The Free plan's AI allowance will be a small monthly limit rather than unlimited use.
+AI captions will use a lower-cost AI model suitable for this type of content.
+Storage limits will be enforced in the background rather than building a detailed storage meter for customers.
+The new hero image/design assets will be supplied separately.
+If any of these assumptions change, I'll let you know before they have a meaningful impact on the estimate.
+How the Estimate Works
+Rate: $30/hour
+These are estimates rather than fixed-price quotes. The ranges reflect the fact that some parts depend on the existing code and the decisions above.
+I'll keep an eye on the hours as the work progresses and flag anything that's looking likely to reach the top end of the estimate before it becomes an issue. The aim is to keep things predictable rather than surprise you at the end.
 This estimate is valid for 30 days from 11 August 2026.
+Once the two open questions above are confirmed, I can tighten the range and we can get started.
