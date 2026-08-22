@@ -136,6 +136,9 @@ export const invoices = pgTable('invoices', {
   convertedFromUnique: uniqueIndex('invoices_converted_from_unique')
     .on(t.convertedFromId)
     .where(sql`${t.convertedFromId} IS NOT NULL`),
+  milestoneUnique: uniqueIndex('invoices_milestone_unique')
+    .on(t.milestoneId)
+    .where(sql`${t.milestoneId} IS NOT NULL`),
 }));
 
 export const invoiceLines = pgTable(
@@ -221,6 +224,8 @@ export const briefs = pgTable(
     billingMode: text('billing_mode').notNull().default('time'),
     currency: text('currency').notNull(),
     ratePerHour: doublePrecision('rate_per_hour').notNull().default(0),
+    /** Deliberately no FK: folder mappings are deleted freely by the app, and a
+     *  foreign key would make that fail in a way the delete path does not expect. */
     folderMappingId: text('folder_mapping_id'),
     /** The estimate as ingested, kept verbatim so the parse can be revisited. */
     sourceText: text('source_text'),
@@ -257,6 +262,7 @@ export const milestones = pgTable(
     status: text('status').notNull().default('pending'),
     readyAt: timestamp('ready_at', { withTimezone: true }),
     invoicedAt: timestamp('invoiced_at', { withTimezone: true }),
+    /** Set to the invoice id once billed; null = still unbilled. */
     invoiceId: text('invoice_id'),
   },
   (t) => ({
