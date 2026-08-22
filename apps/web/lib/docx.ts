@@ -20,6 +20,10 @@ export async function extractDocxText(buf: ArrayBuffer): Promise<string> {
     .replace(/<\/w:tr>/g, '\n')
     .replace(/<\/w:p>/g, '\n')
     .replace(/<[^>]+>/g, '')
+    // A cell is <w:tc><w:p>…</w:p></w:tc>, so the paragraph's newline is emitted
+    // just before the cell's tab. Drop it, or every cell lands on its own line
+    // and no row ever carries its title, hours and cost together.
+    .replace(/\n+(?=\t)/g, '')
     .replace(/&#(\d+);/g, (_, d: string) => String.fromCharCode(Number(d)))
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
