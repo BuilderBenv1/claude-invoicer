@@ -13,15 +13,29 @@ import {
   isKnownCurrency,
   normalizeCurrency,
   normalizePath,
+  parseBriefText,
   prefixesAreDistinct,
   round2,
   weekRange,
+  type ParsedBrief,
 } from '@claude-invoicer/core';
 import { getDb } from './db';
-import { clients, folderMappings, invoiceLines, invoices, oneOffCharges, paymentAccounts, settings, weekAdjustments } from './db/schema';
+import {
+  briefs,
+  clients,
+  folderMappings,
+  invoiceLines,
+  invoices,
+  milestones,
+  oneOffCharges,
+  paymentAccounts,
+  settings,
+  weekAdjustments,
+} from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
 import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
+import { extractDocxText } from './docx';
 import { auth } from './auth';
 
 /**
@@ -51,6 +65,21 @@ function numOrNull(fd: FormData, key: string): number | null {
   if (raw === '') return null;
   const v = Number(raw);
   return Number.isFinite(v) && v >= 0 ? v : null;
+}
+/**
+ * Like num(), but a blank field falls back rather than reading as 0 —
+ * Number('') is 0 and finite, so num() can't tell "left blank" apart from
+ * "typed 0". Used where the fallback is a meaningful default (e.g. the
+ * client's own rate) that a blank field should defer to, not silently
+ * override. Negatives are clamped to 0, same as the rest of this file's form
+ * inputs — a form is not a security boundary.
+ */
+function numOrFallback(fd: FormData, key: string, fallback: number): number {
+  const raw = String(fd.get(key) ?? '').trim();
+  if (raw === '') return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, v);
 }
 
 // ---------------- Clients ----------------
@@ -770,4 +799,179 @@ export async function deletePaymentAccount(fd: FormData): Promise<void> {
   const db = getDb();
   await db.delete(paymentAccounts).where(eq(paymentAccounts.currency, currency));
   revalidatePath('/settings');
+}
+
+// ---------------- Briefs ----------------
+
+const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Parse an uploaded or pasted estimate. Returns the parse for the user to
+ * confirm — it never writes anything. `error` is set rather than thrown so the
+ * form can show the problem beside the field instead of on an error page.
+ *
+ * `sourceText` carries back whatever text was actually handed to the parser
+ * (the paste, or the extracted file contents) so the caller can round-trip it
+ * into `createBrief` without trying to reconstruct it client-side — for an
+ * uploaded file there is no client-side copy of that text to reconstruct.
+ */
+export async function parseBriefUpload(
+  fd: FormData,
+): Promise<ParsedBrief & { error?: string; sourceText?: string }> {
+  await requireOwner();
+  const empty: ParsedBrief = { title: '', currency: 'GBP', ratePerHour: 0, items: [], warnings: [] };
+  // A parse with no items leaves the user staring at an empty table with no
+  // explanation, so every parsing path — paste and every file type — goes
+  // through this guard rather than returning the empty ParsedBrief bare.
+  const withGuard = (
+    p: ParsedBrief,
+    sourceText: string,
+  ): ParsedBrief & { error?: string; sourceText?: string } =>
+    p.items.length === 0
+      ? {
+          ...p,
+          sourceText,
+          error: 'No work items found. Check the estimate has rows with hours and a cost, or paste the text and edit it by hand.',
+        }
+      : { ...p, sourceText };
+
+  try {
+    const pasted = str(fd, 'text');
+    if (pasted) return withGuard(parseBriefText(pasted), pasted);
+
+    const file = fd.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      return { ...empty, error: 'Choose a file or paste the estimate text.' };
+    }
+    if (file.size > MAX_BRIEF_BYTES) {
+      return { ...empty, error: 'That file is over 2 MB. Paste the text instead.' };
+    }
+
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.docx')) {
+      const text = await extractDocxText(await file.arrayBuffer());
+      return withGuard(parseBriefText(text), text);
+    }
+    if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv')) {
+      const text = await file.text();
+      return withGuard(parseBriefText(text), text);
+    }
+    return {
+      ...empty,
+      error: 'Upload a .docx, .txt, .md or .csv — or paste the text. (.doc and .pdf are not supported yet.)',
+    };
+  } catch (e) {
+    return { ...empty, error: `Could not parse the estimate: ${e instanceof Error ? e.message : 'unknown error'}` };
+  }
+}
+
+interface BriefItemInput {
+  section: string;
+  title: string;
+  deliverable: string;
+  amount: number;
+  hoursLow: number;
+  hoursHigh: number;
+  amountLow: number;
+  amountHigh: number;
+}
+
+/** Short, stable, human-legible key for a milestone: M1, M2, … */
+function milestoneKey(idx: number): string {
+  return `M${idx + 1}`;
+}
+
+/** Save a confirmed brief and its milestones. */
+export async function createBrief(fd: FormData): Promise<void> {
+  await requireOwner();
+  const clientId = str(fd, 'clientId');
+  if (!clientId) throw new Error('Pick a client');
+  const title = str(fd, 'title') || 'Untitled brief';
+
+  // A form is not a security boundary — the estimate fields are free-text
+  // inputs client-side, so a negative here is clamped to 0 rather than
+  // trusted, whatever the browser did or didn't validate.
+  const nonNeg = (v: unknown): number => Math.max(0, Number(v) || 0);
+
+  let items: BriefItemInput[] = [];
+  try {
+    const parsed = JSON.parse(str(fd, 'items') || '[]') as unknown;
+    items = (Array.isArray(parsed) ? parsed : [])
+      .map((r) => {
+        const row = r as Record<string, unknown>;
+        return {
+          section: String(row.section ?? '').trim(),
+          title: String(row.title ?? '').trim(),
+          deliverable: String(row.deliverable ?? '').trim(),
+          amount: nonNeg(row.amount),
+          hoursLow: nonNeg(row.hoursLow),
+          hoursHigh: nonNeg(row.hoursHigh),
+          amountLow: nonNeg(row.amountLow),
+          amountHigh: nonNeg(row.amountHigh),
+        };
+      })
+      .filter((r) => r.title);
+  } catch {
+    throw new Error('Could not read the work items');
+  }
+  if (items.length === 0) throw new Error('A brief needs at least one work item');
+
+  const billingMode = str(fd, 'billingMode') === 'fixed' ? 'fixed' : 'time';
+  const folderMappingId = str(fd, 'folderMappingId');
+  const db = getDb();
+  const briefId = newId();
+
+  await db.transaction(async (tx) => {
+    const [client] = await tx.select().from(clients).where(eq(clients.id, clientId));
+    if (!client) throw new Error('Client not found');
+
+    await tx.insert(briefs).values({
+      id: briefId,
+      clientId,
+      title,
+      billingMode,
+      currency: normalizeCurrency(str(fd, 'currency')) || client.currency,
+      ratePerHour: numOrFallback(fd, 'ratePerHour', client.hourlyRate),
+      folderMappingId: folderMappingId || null,
+      sourceText: str(fd, 'sourceText') || null,
+    });
+
+    await tx.insert(milestones).values(
+      items.map((it, i) => ({
+        id: newId(),
+        briefId,
+        idx: i,
+        key: milestoneKey(i),
+        section: it.section || null,
+        title: it.title,
+        deliverable: it.deliverable || null,
+        amount: billingMode === 'fixed' ? it.amount || it.amountHigh : 0,
+        estimateHoursLow: it.hoursLow,
+        estimateHoursHigh: it.hoursHigh,
+        estimateAmountLow: it.amountLow,
+        estimateAmountHigh: it.amountHigh,
+      })),
+    );
+  });
+
+  revalidatePath('/clients/' + clientId);
+  redirect('/briefs/' + briefId);
+}
+
+export async function deleteBrief(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing brief id');
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
+  if (!brief) {
+    // Already gone — a double-click race, most likely. Refresh so the UI
+    // drops it instead of leaving the caller with no feedback at all.
+    revalidatePath('/');
+    return;
+  }
+  // Milestones cascade. Phase D2 will refuse this once a milestone is invoiced.
+  await db.delete(briefs).where(eq(briefs.id, id));
+  revalidatePath('/clients/' + brief.clientId);
+  redirect('/clients/' + brief.clientId);
 }

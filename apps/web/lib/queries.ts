@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   aggregateIntervals,
   adjustmentLine,
@@ -26,17 +26,21 @@ import {
 import { getDb } from './db';
 import {
   activityIntervals,
+  briefs,
   clients,
   folderMappings,
   invoiceLines,
   invoices,
+  milestones,
   oneOffCharges,
   paymentAccounts,
   receipts,
   weekAdjustments,
+  type Brief,
   type Client,
   type Invoice,
   type InvoiceLine,
+  type Milestone,
   type OneOffCharge,
   type PaymentAccountRow,
   type Settings,
@@ -385,6 +389,52 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
 export async function listClients(): Promise<Client[]> {
   const db = getDb();
   return db.select().from(clients).where(eq(clients.archived, 0)).orderBy(clients.name);
+}
+
+export interface BriefSummary {
+  brief: Brief;
+  milestoneCount: number;
+  hoursLow: number;
+  hoursHigh: number;
+  amountLow: number;
+  amountHigh: number;
+}
+
+/** Briefs for a client, newest first, with their estimate rolled up. */
+export async function listBriefs(clientId: string): Promise<BriefSummary[]> {
+  const db = getDb();
+  const briefRows = await db
+    .select()
+    .from(briefs)
+    .where(eq(briefs.clientId, clientId))
+    .orderBy(desc(briefs.createdAt));
+  if (briefRows.length === 0) return [];
+  const milestoneRows = await db
+    .select()
+    .from(milestones)
+    .where(inArray(milestones.briefId, briefRows.map((b) => b.id)));
+
+  return briefRows.map((brief) => {
+    const mine = milestoneRows.filter((m) => m.briefId === brief.id);
+    return {
+      brief,
+      milestoneCount: mine.length,
+      hoursLow: round2(mine.reduce((s, m) => s + m.estimateHoursLow, 0)),
+      hoursHigh: round2(mine.reduce((s, m) => s + m.estimateHoursHigh, 0)),
+      amountLow: round2(mine.reduce((s, m) => s + m.estimateAmountLow, 0)),
+      amountHigh: round2(mine.reduce((s, m) => s + m.estimateAmountHigh, 0)),
+    };
+  });
+}
+
+export async function getBriefDetail(
+  id: string,
+): Promise<{ brief: Brief; milestones: Milestone[] } | null> {
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
+  if (!brief) return null;
+  const rows = await db.select().from(milestones).where(eq(milestones.briefId, id)).orderBy(milestones.idx);
+  return { brief, milestones: rows };
 }
 
 /** Bank details rows, default first, then by currency. */
