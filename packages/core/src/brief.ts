@@ -21,8 +21,10 @@ export interface ParsedBrief {
 const DASH = '[\\u2013\\u2014-]';
 const SYMBOL_CURRENCY: [string, string][] = [['£', 'GBP'], ['$', 'USD'], ['€', 'EUR']];
 
-/** A row that restates other rows rather than describing work of its own. */
-const AGGREGATE_ROW = /^(sub)?total\b|^overall\b|^estimated\s+(time|cost)\b|^area\b|^work$|^hours$/i;
+/** A cell that restates other rows rather than describing work of its own.
+ *  Matched exactly: these are header and subtotal CELLS, so a real work item
+ *  titled "Total infrastructure overhaul" must survive. */
+const AGGREGATE_ROW = /^(?:(?:sub)?total|overall|area|work|hours|estimated\s+(?:time|cost))$/i;
 /** A heading after which everything restates what came before. */
 const SUMMARY_HEADING = /^(overall estimate|summary)\b/i;
 /** "1. Moving to the Free + Pro Plans" */
@@ -71,7 +73,7 @@ export function parseBriefText(text: string): ParsedBrief {
   const out: ParsedBrief = { title: '', currency: '', ratePerHour: 0, items: [], warnings: [] };
   let section = '';
   let inSummary = false;
-  let skippedAggregates = 0;
+  const skipped: string[] = [];
 
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -100,11 +102,13 @@ export function parseBriefText(text: string): ParsedBrief {
     if (!title) continue;
 
     if (AGGREGATE_ROW.test(title)) {
-      skippedAggregates += 1;
+      skipped.push(title);
       continue;
     }
 
-    const rest = cells.length > 1 ? cells.slice(1).join(' ') : line.slice(title.length);
+    // Rows must be tab-delimited to carry hours/cost cells — a title with no
+    // tab has nothing left to parse.
+    const rest = cells.slice(1).join(' ');
     const hours = hoursRange(rest);
     const money = moneyRange(rest);
     if (!hours && !money) continue;
@@ -118,6 +122,9 @@ export function parseBriefText(text: string): ParsedBrief {
       }
     }
 
+    if (!hours) out.warnings.push(`No hours found for "${title}" — check it against the estimate.`);
+    if (!money) out.warnings.push(`No cost found for "${title}" — check it against the estimate.`);
+
     out.items.push({
       section,
       title,
@@ -128,9 +135,11 @@ export function parseBriefText(text: string): ParsedBrief {
     });
   }
 
-  if (skippedAggregates > 0) {
+  if (skipped.length > 0) {
+    const shown = skipped.slice(0, 8).join(', ');
+    const more = skipped.length > 8 ? ` and ${skipped.length - 8} more` : '';
     out.warnings.push(
-      `Skipped ${skippedAggregates} subtotal or header row${skippedAggregates === 1 ? '' : 's'} — counting them would double the total.`,
+      `Skipped ${skipped.length} subtotal or header row${skipped.length === 1 ? '' : 's'} (${shown}${more}) — counting them would double the total.`,
     );
   }
   if (!out.currency) out.currency = 'GBP';

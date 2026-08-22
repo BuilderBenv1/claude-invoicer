@@ -81,3 +81,47 @@ describe('parseBriefText — what it must NOT count', () => {
     expect(r.title).toBe('');
   });
 });
+
+describe('parseBriefText — aggregate-word titles must survive', () => {
+  it('does not drop genuine items whose titles merely start with an aggregate word', () => {
+    const r = parseBriefText(
+      [
+        'Work on the API\t2 hrs\t$60',
+        'Overall system redesign\t10 hrs\t$300',
+        'Total infrastructure overhaul\t5 hrs\t$150',
+        'Area of focus: mobile app\t3 hrs\t$90',
+      ].join('\n'),
+    );
+    expect(r.items.map((i) => i.title)).toEqual([
+      'Work on the API',
+      'Overall system redesign',
+      'Total infrastructure overhaul',
+      'Area of focus: mobile app',
+    ]);
+  });
+});
+
+describe('parseBriefText — half-parsed rows are flagged, not silently zeroed', () => {
+  it('warns when an accepted row has money but no hours unit', () => {
+    const r = parseBriefText('Item\t2-3\t$60-$90');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ hoursLow: 0, hoursHigh: 0, amountLow: 60, amountHigh: 90 });
+    expect(r.warnings.join(' ')).toMatch(/no hours found for "Item"/i);
+  });
+  it('warns when an accepted row has hours but no cost', () => {
+    const r = parseBriefText('Item\t2-3 hrs');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ hoursLow: 2, hoursHigh: 3, amountLow: 0, amountHigh: 0 });
+    expect(r.warnings.join(' ')).toMatch(/no cost found for "Item"/i);
+  });
+});
+
+describe('parseBriefText — the skip warning names what it skipped', () => {
+  it('lists the skipped row titles, not just a count', () => {
+    const r = parseBriefText('A\t1 hr\t$30\nSubtotal\t1 hr\t$30\nWork\tEstimated time\tEstimated cost');
+    expect(r.items).toHaveLength(1);
+    const joined = r.warnings.join(' ');
+    expect(joined).toMatch(/Subtotal/);
+    expect(joined).toMatch(/Work/);
+  });
+});
