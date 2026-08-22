@@ -3,6 +3,7 @@ import { loadConfig, CONFIG_PATH, type AgentConfig } from './config.js';
 import { clearCursor, saveCursor } from './cursor.js';
 import { scan, type ScanResult } from './scanner.js';
 import { uploadIntervals } from './uploader.js';
+import { syncMilestones } from './milestones.js';
 
 const MIN = 60_000;
 
@@ -41,6 +42,22 @@ function printDrySummary(result: ScanResult): void {
   console.log('(dry run — nothing uploaded, cursor untouched)');
 }
 
+/**
+ * Write each brief's MILESTONES.md and report ticked boxes. Best-effort: a
+ * brief-sync failure must never block interval upload, which is the agent's
+ * primary job. Never called on a dry run — a dry run writes nothing.
+ */
+async function syncBriefs(cfg: AgentConfig): Promise<void> {
+  try {
+    const ms = await syncMilestones(cfg.apiBaseUrl, cfg.deviceToken);
+    if (ms.files || ms.ticks || ms.issued) {
+      log(`milestones: ${ms.files} file(s) written, ${ms.ticks} tick(s), ${ms.issued} invoice(s) issued`);
+    }
+  } catch (e) {
+    log(`milestone sync failed (non-fatal): ${(e as Error).message}`);
+  }
+}
+
 async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boolean }): Promise<void> {
   const idleCapMs = cfg.idleCapMin * MIN;
 
@@ -62,6 +79,7 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boole
     // Persist the cursor only now that the upload succeeded.
     saveCursor(result.cursor);
     log(`resync complete: replaced with ${resp.accepted} interval(s)`);
+    await syncBriefs(cfg);
     return;
   }
 
@@ -69,6 +87,8 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boole
   if (result.intervals.length === 0) {
     log(`scan: ${result.filesChanged}/${result.filesTotal} changed, nothing new to upload`);
     saveCursor(result.cursor); // safe: no intervals to lose
+    // Still sync: a milestone can be ticked in a scan that found no new time.
+    await syncBriefs(cfg);
     return;
   }
   log(`scan: ${result.filesChanged}/${result.filesTotal} changed -> ${result.intervals.length} intervals, uploading...`);
@@ -81,6 +101,7 @@ async function runOnce(cfg: AgentConfig, opts: { dryRun: boolean; resync?: boole
     log('server requested resync — clearing cursor, next scan re-reads everything');
     clearCursor();
   }
+  await syncBriefs(cfg);
 }
 
 function requireServerConfig(cfg: AgentConfig): void {
