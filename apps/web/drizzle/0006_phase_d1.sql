@@ -84,3 +84,17 @@ COMMIT;
 CREATE UNIQUE INDEX IF NOT EXISTS milestones_brief_key_unique ON milestones (brief_id, key);
 CREATE UNIQUE INDEX IF NOT EXISTS invoices_milestone_unique
   ON invoices (milestone_id) WHERE milestone_id IS NOT NULL;
+
+-- A brief may reference a folder mapping; if that mapping is deleted the brief
+-- simply loses its folder rather than blocking the delete or dangling. ADD
+-- CONSTRAINT can fail on existing data, so — like the indexes above — it runs
+-- here, after COMMIT, guarded so a re-run doesn't error on a constraint that's
+-- already there.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_constraint WHERE conname = 'briefs_folder_mapping_fk') THEN
+    ALTER TABLE briefs
+      ADD CONSTRAINT briefs_folder_mapping_fk
+      FOREIGN KEY (folder_mapping_id) REFERENCES folder_mappings(id) ON DELETE SET NULL;
+  END IF;
+END $$;

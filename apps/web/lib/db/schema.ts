@@ -224,9 +224,10 @@ export const briefs = pgTable(
     billingMode: text('billing_mode').notNull().default('time'),
     currency: text('currency').notNull(),
     ratePerHour: doublePrecision('rate_per_hour').notNull().default(0),
-    /** Deliberately no FK: folder mappings are deleted freely by the app, and a
-     *  foreign key would make that fail in a way the delete path does not expect. */
-    folderMappingId: text('folder_mapping_id'),
+    /** A brief may reference a folder mapping; if that mapping is deleted the
+     *  brief simply loses its folder (ON DELETE SET NULL) rather than blocking
+     *  the delete or dangling on a row that no longer exists. */
+    folderMappingId: text('folder_mapping_id').references(() => folderMappings.id, { onDelete: 'set null' }),
     /** The estimate as ingested, kept verbatim so the parse can be revisited. */
     sourceText: text('source_text'),
     status: text('status').notNull().default('active'),
