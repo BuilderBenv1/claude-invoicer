@@ -125,6 +125,26 @@ describe('parseBriefText — aggregate-word titles must survive', () => {
   });
 });
 
+describe('parseBriefText — the paste path: a tab-less line can still be a row', () => {
+  it('treats a line with both a duration and an amount as a candidate item, titled from what is left', () => {
+    const r = parseBriefText('Build the API - 2-3 hrs - $60-$90');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({
+      title: 'Build the API',
+      hoursLow: 2,
+      hoursHigh: 3,
+      amountLow: 60,
+      amountHigh: 90,
+    });
+  });
+  it('still ignores prose that merely mentions a number, with no tabs and no unit', () => {
+    expect(parseBriefText('This estimate is valid for 30 days from 11 August 2026.').items).toHaveLength(0);
+  });
+  it('does not invent an item from a duration alone — money is required too', () => {
+    expect(parseBriefText('Some work — 4 hrs').items).toHaveLength(0);
+  });
+});
+
 describe('parseBriefText — unreadable table rows are reported, not dropped', () => {
   it('warns when a two-cell (or more) row has no readable hours or cost, instead of vanishing', () => {
     const r = parseBriefText('Design the thing\tTBC\tTBC');

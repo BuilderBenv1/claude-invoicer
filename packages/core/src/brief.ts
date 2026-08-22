@@ -44,28 +44,31 @@ function num(raw: string): number {
 
 const HOURS_UNIT = 'h(?:rs?|ours?)?\\b';
 
-/** Low/high hours from "2-3 hrs", "2 to 3 hrs" or "4 hrs". Null when absent. */
-function hoursRange(text: string): { low: number; high: number } | null {
+/** Low/high hours from "2-3 hrs", "2 to 3 hrs" or "4 hrs". Null when absent.
+ *  `match` is the exact substring matched, so a caller can strip it out of a
+ *  line to recover a title (used by the no-tab "line as a row" fallback). */
+function hoursRange(text: string): { low: number; high: number; match: string } | null {
   const both = new RegExp(`([\\d.,]+)\\s*(?:${DASH}|to)\\s*([\\d.,]+)\\s*${HOURS_UNIT}`, 'i').exec(text);
-  if (both) return { low: num(both[1]!), high: num(both[2]!) };
+  if (both) return { low: num(both[1]!), high: num(both[2]!), match: both[0] };
   const one = new RegExp(`([\\d.,]+)\\s*${HOURS_UNIT}`, 'i').exec(text);
   if (!one) return null;
   const v = num(one[1]!);
-  return { low: v, high: v };
+  return { low: v, high: v, match: one[0] };
 }
 
-/** Money ranges: "$60-$90", "60-90", "$1,200". Null when absent. */
-function moneyRange(text: string): { low: number; high: number } | null {
+/** Money ranges: "$60-$90", "60-90", "$1,200". Null when absent. `match` is
+ *  the exact substring matched (see hoursRange). */
+function moneyRange(text: string): { low: number; high: number; match: string } | null {
   const both = new RegExp(
     `[\\u00a3$\\u20ac]\\s*([\\d.,]+)\\s*(?:${DASH}|to)\\s*[\\u00a3$\\u20ac]?\\s*([\\d.,]+)`,
   ).exec(text);
-  if (both) return { low: num(both[1]!), high: num(both[2]!) };
+  if (both) return { low: num(both[1]!), high: num(both[2]!), match: both[0] };
   const one = /[£$€]\s*([\d.,]+)/.exec(text);
-  if (one) return { low: num(one[1]!), high: num(one[1]!) };
+  if (one) return { low: num(one[1]!), high: num(one[1]!), match: one[0] };
   const bare = new RegExp(`(?:^|\\s)([\\d.,]+)\\s*(?:${DASH}|to)\\s*([\\d.,]+)\\s*$`).exec(text);
-  if (bare) return { low: num(bare[1]!), high: num(bare[2]!) };
+  if (bare) return { low: num(bare[1]!), high: num(bare[2]!), match: bare[0] };
   const single = /(?:^|\s)([\d.,]+)\s*$/.exec(text);
-  return single ? { low: num(single[1]!), high: num(single[1]!) } : null;
+  return single ? { low: num(single[1]!), high: num(single[1]!), match: single[0] } : null;
 }
 
 /**
@@ -173,16 +176,52 @@ export function parseBriefText(text: string): ParsedBrief {
       continue;
     }
 
-    // Rows must be tab-delimited to carry hours/cost cells — a title with no
-    // tab has nothing left to parse.
+    if (cells.length < 2) {
+      // Rows before lines: a tab-delimited row is the primary signal, but a
+      // pasted estimate has no tabs at all. A bare line is only a candidate
+      // work item when it carries BOTH a duration and an amount — requiring
+      // both is what keeps this from turning an ordinary sentence that merely
+      // mentions a number into an invented item, and it's why this doesn't
+      // warn like the unreadable-row case below: a line with no tab was never
+      // confirmed to be a row in the first place.
+      const hours = hoursRange(line);
+      const money = moneyRange(line);
+      if (!hours || !money) continue;
+
+      let lineTitle = line.replace(hours.match, ' ').replace(money.match, ' ');
+      lineTitle = lineTitle.replace(/\s+/g, ' ').trim().replace(/[\s:—–-]+$/, '').trim();
+      if (!lineTitle) continue;
+
+      if (!out.currency) {
+        for (const [sym, code] of SYMBOL_CURRENCY) {
+          if (line.includes(sym)) {
+            out.currency = code;
+            break;
+          }
+        }
+      }
+
+      out.items.push({
+        section,
+        title: lineTitle,
+        hoursLow: hours.low,
+        hoursHigh: hours.high,
+        amountLow: money.low,
+        amountHigh: money.high,
+      });
+      sectionHasTableItem = true;
+      continue;
+    }
+
+    // Tab-delimited row: hours/cost live in the cells after the title.
     const rest = cells.slice(1).join(' ');
     const hours = hoursRange(rest);
     const money = moneyRange(rest);
     if (!hours && !money) {
       // A row with 2+ cells was still a table row — its figures just didn't
       // parse. That's under-billing if it silently vanishes, so it's reported
-      // instead of dropped. A single-cell line (no tab) is prose, not a row.
-      if (cells.length >= 2) unreadable.push(title);
+      // instead of dropped.
+      unreadable.push(title);
       continue;
     }
 

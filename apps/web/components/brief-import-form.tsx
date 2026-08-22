@@ -149,6 +149,7 @@ export function BriefImportForm({
           <input
             name="ratePerHour"
             type="number"
+            min="0"
             step="0.01"
             value={rate}
             onChange={(e) => setRate(e.target.value)}

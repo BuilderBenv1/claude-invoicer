@@ -66,6 +66,21 @@ function numOrNull(fd: FormData, key: string): number | null {
   const v = Number(raw);
   return Number.isFinite(v) && v >= 0 ? v : null;
 }
+/**
+ * Like num(), but a blank field falls back rather than reading as 0 —
+ * Number('') is 0 and finite, so num() can't tell "left blank" apart from
+ * "typed 0". Used where the fallback is a meaningful default (e.g. the
+ * client's own rate) that a blank field should defer to, not silently
+ * override. Negatives are clamped to 0, same as the rest of this file's form
+ * inputs — a form is not a security boundary.
+ */
+function numOrFallback(fd: FormData, key: string, fallback: number): number {
+  const raw = String(fd.get(key) ?? '').trim();
+  if (raw === '') return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, v);
+}
 
 // ---------------- Clients ----------------
 
@@ -916,7 +931,7 @@ export async function createBrief(fd: FormData): Promise<void> {
       title,
       billingMode,
       currency: normalizeCurrency(str(fd, 'currency')) || client.currency,
-      ratePerHour: num(fd, 'ratePerHour', client.hourlyRate),
+      ratePerHour: numOrFallback(fd, 'ratePerHour', client.hourlyRate),
       folderMappingId: folderMappingId || null,
       sourceText: str(fd, 'sourceText') || null,
     });
