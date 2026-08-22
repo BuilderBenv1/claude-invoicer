@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   aggregateIntervals,
   adjustmentLine,
@@ -409,7 +409,10 @@ export async function listBriefs(clientId: string): Promise<BriefSummary[]> {
     .where(eq(briefs.clientId, clientId))
     .orderBy(desc(briefs.createdAt));
   if (briefRows.length === 0) return [];
-  const milestoneRows = await db.select().from(milestones);
+  const milestoneRows = await db
+    .select()
+    .from(milestones)
+    .where(inArray(milestones.briefId, briefRows.map((b) => b.id)));
 
   return briefRows.map((brief) => {
     const mine = milestoneRows.filter((m) => m.briefId === brief.id);

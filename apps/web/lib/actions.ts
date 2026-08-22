@@ -798,35 +798,42 @@ const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 export async function parseBriefUpload(fd: FormData): Promise<ParsedBrief & { error?: string }> {
   await requireOwner();
   const empty: ParsedBrief = { title: '', currency: 'GBP', ratePerHour: 0, items: [], warnings: [] };
+  // A parse with no items leaves the user staring at an empty table with no
+  // explanation, so every parsing path — paste and every file type — goes
+  // through this guard rather than returning the empty ParsedBrief bare.
+  const withGuard = (p: ParsedBrief): ParsedBrief & { error?: string } =>
+    p.items.length === 0
+      ? {
+          ...p,
+          error: 'No work items found. Check the estimate has rows with hours and a cost, or paste the text and edit it by hand.',
+        }
+      : p;
 
-  const pasted = str(fd, 'text');
-  if (pasted) return parseBriefText(pasted);
-
-  const file = fd.get('file');
-  if (!(file instanceof File) || file.size === 0) {
-    return { ...empty, error: 'Choose a file or paste the estimate text.' };
-  }
-  if (file.size > MAX_BRIEF_BYTES) {
-    return { ...empty, error: 'That file is over 2 MB. Paste the text instead.' };
-  }
-
-  const name = file.name.toLowerCase();
   try {
+    const pasted = str(fd, 'text');
+    if (pasted) return withGuard(parseBriefText(pasted));
+
+    const file = fd.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      return { ...empty, error: 'Choose a file or paste the estimate text.' };
+    }
+    if (file.size > MAX_BRIEF_BYTES) {
+      return { ...empty, error: 'That file is over 2 MB. Paste the text instead.' };
+    }
+
+    const name = file.name.toLowerCase();
     if (name.endsWith('.docx')) {
-      const parsed = parseBriefText(await extractDocxText(await file.arrayBuffer()));
-      return parsed.items.length === 0
-        ? { ...parsed, error: 'No work items found in that document. Paste the text and edit it by hand.' }
-        : parsed;
+      return withGuard(parseBriefText(await extractDocxText(await file.arrayBuffer())));
     }
     if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv')) {
-      return parseBriefText(await file.text());
+      return withGuard(parseBriefText(await file.text()));
     }
     return {
       ...empty,
       error: 'Upload a .docx, .txt, .md or .csv — or paste the text. (.doc and .pdf are not supported yet.)',
     };
   } catch (e) {
-    return { ...empty, error: `Could not read that file: ${e instanceof Error ? e.message : 'unknown error'}` };
+    return { ...empty, error: `Could not parse the estimate: ${e instanceof Error ? e.message : 'unknown error'}` };
   }
 }
 
@@ -924,7 +931,12 @@ export async function deleteBrief(fd: FormData): Promise<void> {
   if (!id) throw new Error('Missing brief id');
   const db = getDb();
   const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
-  if (!brief) return;
+  if (!brief) {
+    // Already gone — a double-click race, most likely. Refresh so the UI
+    // drops it instead of leaving the caller with no feedback at all.
+    revalidatePath('/');
+    return;
+  }
   // Milestones cascade. Phase D2 will refuse this once a milestone is invoiced.
   await db.delete(briefs).where(eq(briefs.id, id));
   revalidatePath('/clients/' + brief.clientId);
