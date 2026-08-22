@@ -467,12 +467,32 @@ export async function listBriefs(clientId: string): Promise<BriefSummary[]> {
 
 export async function getBriefDetail(
   id: string,
-): Promise<{ brief: Brief; milestones: Milestone[] } | null> {
+): Promise<{ brief: Brief; milestones: Milestone[]; trackedHours: number } | null> {
   const db = getDb();
   const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
   if (!brief) return null;
   const rows = await db.select().from(milestones).where(eq(milestones.briefId, id)).orderBy(milestones.idx);
-  return { brief, milestones: rows };
+
+  // Hours tracked against this brief's folder, all time. An internal burn-down
+  // and margin check; it never reaches the client.
+  let trackedHours = 0;
+  if (brief.folderMappingId) {
+    const [fm] = await db.select().from(folderMappings).where(eq(folderMappings.id, brief.folderMappingId));
+    if (fm) {
+      const [coreMappings, rawIntervals] = await Promise.all([
+        loadCoreMappings(db),
+        db.select().from(activityIntervals),
+      ]);
+      const scoped = applyFolderCutoffs(
+        rawIntervals
+          .map(toCoreInterval)
+          .filter((it) => matchMapping(it.cwd, coreMappings)?.path === fm.path),
+        coreMappings,
+      );
+      trackedHours = round2(scoped.reduce((s, it) => s + it.activeMs, 0) / MS_PER_HOUR);
+    }
+  }
+  return { brief, milestones: rows, trackedHours };
 }
 
 /** Bank details rows, default first, then by currency. */

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBriefDetail } from '@/lib/queries';
 import { formatMoney } from '@/lib/format';
-import { deleteBrief } from '@/lib/actions';
+import { deleteBrief, completeMilestone, cancelMilestone, issueMilestoneNow } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const detail = await getBriefDetail(id);
   if (!detail) notFound();
-  const { brief, milestones } = detail;
+  const { brief, milestones, trackedHours } = detail;
 
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
@@ -63,7 +63,44 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                   <td className="py-2 text-right">{formatMoney(m.amount, brief.currency)}</td>
                 )}
                 <td className="py-2 text-right">
-                  <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">{m.status}</span>
+                  {m.status === 'pending' && (
+                    <form action={completeMilestone} className="inline">
+                      <input type="hidden" name="id" value={m.id} />
+                      <button className="btn-secondary text-xs" type="submit">
+                        Mark delivered
+                      </button>
+                    </form>
+                  )}
+                  {m.status === 'ready' && (
+                    <div className="flex justify-end gap-2">
+                      <form action={issueMilestoneNow} className="inline">
+                        <input type="hidden" name="id" value={m.id} />
+                        <button className="btn-primary text-xs" type="submit">
+                          Invoice now
+                        </button>
+                      </form>
+                      <form action={cancelMilestone} className="inline">
+                        <input type="hidden" name="id" value={m.id} />
+                        <button className="btn-secondary text-xs" type="submit">
+                          Cancel
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                  {m.status === 'invoiced' &&
+                    (m.invoiceId ? (
+                      <Link
+                        href={`/invoices/${m.invoiceId}`}
+                        className="text-xs text-emerald-400 hover:underline"
+                      >
+                        Invoiced
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-emerald-400">Invoiced</span>
+                    ))}
+                  {m.status === 'complete' && (
+                    <span className="text-xs text-slate-500">Done · nothing to bill</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -95,10 +132,49 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
         </table>
       </div>
 
-      <p className="text-xs text-slate-500">
-        Ticking milestones off and billing against them arrives in the next phase. For now this is the
-        record of what was quoted.
-      </p>
+      {(() => {
+        const lowTotal = sum((m) => m.estimateHoursLow);
+        const highTotal = sum((m) => m.estimateHoursHigh);
+        const tone =
+          trackedHours > highTotal
+            ? 'text-rose-400'
+            : trackedHours > lowTotal
+              ? 'text-amber-400'
+              : 'text-emerald-400';
+        const earned = sum((m) => (m.status === 'invoiced' ? m.amount : 0));
+        return (
+          <div className="card space-y-1 text-sm">
+            <p>
+              <span className="text-slate-400">Tracked against this folder: </span>
+              <span className={tone}>{trackedHours} hrs</span>
+              {highTotal > 0 && (
+                <span className="text-slate-500">
+                  {' '}
+                  of {lowTotal}–{highTotal} estimated
+                </span>
+              )}
+            </p>
+            {isFixed && earned > 0 && trackedHours > 0 && (
+              <p className="text-slate-400">
+                Invoiced {formatMoney(earned, brief.currency)} — effective{' '}
+                {formatMoney(Math.round((earned / trackedHours) * 100) / 100, brief.currency)}/hr.{' '}
+                <span className="text-slate-500">Internal only; never shown to the client.</span>
+              </p>
+            )}
+            {highTotal > 0 && trackedHours > highTotal && (
+              <p className="text-rose-400">
+                Past the top of the estimate — flag this with the client before it becomes an issue.
+              </p>
+            )}
+            {!brief.folderMappingId && (
+              <p className="text-amber-400">
+                No folder is attached to this brief, so no time is tracked against it and time &amp;
+                materials milestones have nothing to bill. Attach one on the client page.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       <form action={deleteBrief}>
         <input type="hidden" name="id" value={brief.id} />

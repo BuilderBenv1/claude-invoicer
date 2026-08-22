@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import {
   canDeleteClient,
   confirmationMatches,
@@ -34,7 +34,15 @@ import {
 } from './db/schema';
 import { getSettings } from './settings';
 import { newId } from './format';
-import { insertInvoice, issueWeekInvoice, markPaidTx, markPaidAndReceipt, emailInvoiceById, emailReceiptById } from './invoice-service';
+import {
+  insertInvoice,
+  issueWeekInvoice,
+  issueMilestoneInvoice,
+  markPaidTx,
+  markPaidAndReceipt,
+  emailInvoiceById,
+  emailReceiptById,
+} from './invoice-service';
 import { extractDocxText } from './docx';
 import { auth } from './auth';
 
@@ -970,8 +978,80 @@ export async function deleteBrief(fd: FormData): Promise<void> {
     revalidatePath('/');
     return;
   }
-  // Milestones cascade. Phase D2 will refuse this once a milestone is invoiced.
+  // Milestones cascade on delete, so a brief that has already billed would take
+  // its milestone rows with it and leave those invoices pointing at nothing.
+  // Invoices are the accounting record; the brief is not worth that.
+  const billed = await db
+    .select({ id: milestones.id })
+    .from(milestones)
+    .where(and(eq(milestones.briefId, id), isNotNull(milestones.invoiceId)));
+  if (billed.length > 0) {
+    throw new Error(
+      `Cannot delete "${brief.title}" — ${billed.length} milestone(s) have already been invoiced. ` +
+        'Archive the brief instead.',
+    );
+  }
   await db.delete(briefs).where(eq(briefs.id, id));
   revalidatePath('/clients/' + brief.clientId);
   redirect('/clients/' + brief.clientId);
+}
+
+/** Refresh every surface a milestone state change is visible on. */
+function revalidateMilestone(briefId: string): void {
+  revalidatePath('/briefs/' + briefId);
+  revalidatePath('/'); // the dashboard's "Needs attention" list
+  revalidatePath('/invoices');
+}
+
+/** Mark a milestone delivered: pending -> ready, starting the hold window. */
+export async function completeMilestone(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing milestone id');
+  const db = getDb();
+  const [m] = await db
+    .update(milestones)
+    .set({ status: 'ready', readyAt: new Date() })
+    .where(and(eq(milestones.id, id), eq(milestones.status, 'pending')))
+    .returning({ briefId: milestones.briefId });
+  if (m) revalidateMilestone(m.briefId);
+}
+
+/** Pull a milestone back out of its hold window, before anything is billed. */
+export async function cancelMilestone(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing milestone id');
+  const db = getDb();
+  // Only 'ready' can be cancelled — invoiced and complete are terminal.
+  const [m] = await db
+    .update(milestones)
+    .set({ status: 'pending', readyAt: null })
+    .where(and(eq(milestones.id, id), eq(milestones.status, 'ready')))
+    .returning({ briefId: milestones.briefId });
+  if (m) revalidateMilestone(m.briefId);
+}
+
+/** Bill a ready milestone now, without waiting out the hold window. */
+export async function issueMilestoneNow(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing milestone id');
+  const [m] = await getDb()
+    .select({ briefId: milestones.briefId })
+    .from(milestones)
+    .where(eq(milestones.id, id));
+  const res = await issueMilestoneInvoice(id);
+  if (res.ok) {
+    // Best-effort: RESEND_API_KEY is often unset, and a failed send must not
+    // hide an invoice that was genuinely issued.
+    try {
+      await emailInvoiceById(res.id);
+    } catch (e) {
+      console.warn('milestone invoice issued but not emailed:', e);
+    }
+  } else if (res.reason !== 'nothing-to-bill' && res.reason !== 'already-invoiced') {
+    throw new Error(`Could not issue this milestone: ${res.reason}`);
+  }
+  if (m) revalidateMilestone(m.briefId);
 }
