@@ -214,6 +214,18 @@ export interface ClientStat {
   invoiceCount: number;
 }
 
+/** A milestone marked delivered but not yet billed — inside its hold window. */
+export interface ReadyMilestone {
+  id: string;
+  title: string;
+  briefId: string;
+  briefTitle: string;
+  clientName: string;
+  readyAt: Date | null;
+  holdMinutes: number;
+  autoInvoice: boolean;
+}
+
 export interface OverviewData {
   settings: Settings;
   stats: ClientStat[];
@@ -221,6 +233,7 @@ export interface OverviewData {
   clients: Client[];
   currentWeekKey: string;
   archived: { client: Client; invoiceCount: number }[];
+  readyMilestones: ReadyMilestone[];
 }
 
 export async function getOverview(): Promise<OverviewData> {
@@ -256,6 +269,30 @@ export async function getOverview(): Promise<OverviewData> {
     invoiceCount: invoiceCountFor(invoiceRows, client.id),
   }));
 
+  // Milestones inside their hold window. Surfaced on the dashboard because the
+  // hold window is the chance to stop an invoice going out, and it is worthless
+  // if you have to already be on the right brief page to notice it.
+  const readyRows = await db
+    .select({
+      id: milestones.id,
+      title: milestones.title,
+      briefId: briefs.id,
+      briefTitle: briefs.title,
+      clientName: clients.name,
+      readyAt: milestones.readyAt,
+      holdMinutes: briefs.holdMinutes,
+      autoInvoice: briefs.autoInvoice,
+    })
+    .from(milestones)
+    .innerJoin(briefs, eq(milestones.briefId, briefs.id))
+    .innerJoin(clients, eq(briefs.clientId, clients.id))
+    .where(and(eq(milestones.status, 'ready'), eq(briefs.status, 'active')))
+    .orderBy(milestones.readyAt);
+  const readyMilestones: ReadyMilestone[] = readyRows.map((r) => ({
+    ...r,
+    autoInvoice: r.autoInvoice === 1,
+  }));
+
   return {
     settings: s,
     stats: stats.sort((a, b) => b.thisWeekMs - a.thisWeekMs),
@@ -263,6 +300,7 @@ export async function getOverview(): Promise<OverviewData> {
     clients: clientRows,
     currentWeekKey: currentKey,
     archived,
+    readyMilestones,
   };
 }
 
