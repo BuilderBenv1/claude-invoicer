@@ -2,7 +2,9 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { NeonDatabase } from 'drizzle-orm/neon-serverless';
 import {
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
   intervalsForClient,
+  matchMapping,
   buildInvoiceLines,
   adjustmentLine,
   round2,
@@ -36,7 +38,7 @@ import {
   type Settings,
 } from './db/schema';
 import { getSettings } from './settings';
-import { getInvoiceDetail } from './queries';
+import { getInvoiceDetail, loadCoreMappings } from './queries';
 import { sendInvoiceEmail, sendReceiptEmail } from './email';
 import { newId, newToken } from './format';
 
@@ -231,14 +233,7 @@ export async function issueWeekInvoice(
       );
     if (existing[0]) return { ok: false, reason: 'already-invoiced', number: existing[0].number };
 
-    const rawMappings = await tx.select().from(folderMappings);
-    const coreMappings: CoreMapping[] = rawMappings.map((m) => ({
-      clientId: m.clientId,
-      path: m.path,
-      label: m.label ?? undefined,
-      ratePerHour: m.hourlyRate ?? undefined,
-      billFromMs: m.billFromMs || undefined,
-    }));
+    const coreMappings = await loadCoreMappings(tx);
     const rawIntervals = await tx.select().from(activityIntervals);
     const intervals: CoreInterval[] = rawIntervals.map((r) => ({
       sessionId: r.sessionId,
@@ -248,7 +243,10 @@ export async function issueWeekInvoice(
       activeMs: r.activeMs,
     }));
 
-    const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
+    const ci = excludeBriefBilledFolders(
+      applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings),
+      coreMappings,
+    );
     const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
     const timeLines = buildInvoiceLines(ci, {
       ratePerHour: client.hourlyRate,

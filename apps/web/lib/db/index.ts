@@ -19,3 +19,13 @@ export function getDb(): NeonDatabase<typeof schema> {
 }
 
 export { schema };
+
+/** The Drizzle client. */
+export type Db = NeonDatabase<typeof schema>;
+/** A Drizzle transaction handle, as passed to `db.transaction(tx => ...)`. */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+/**
+ * Either handle. Helpers that read rows take this so they can be called from
+ * inside a transaction without loading a second connection's view of the data.
+ */
+export type DbOrTx = Db | Tx;

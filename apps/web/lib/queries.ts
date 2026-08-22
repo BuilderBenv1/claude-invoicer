@@ -15,6 +15,8 @@ import {
   weekRange,
   activeWithin,
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
+  MS_PER_HOUR,
   matchMapping,
   basename,
   weekProjectDayGrid,
@@ -23,7 +25,7 @@ import {
   type WeekProjectDayGrid,
   type RoundMode,
 } from '@claude-invoicer/core';
-import { getDb } from './db';
+import { getDb, type DbOrTx } from './db';
 import {
   activityIntervals,
   briefs,
@@ -61,17 +63,42 @@ function toCoreMapping(m: typeof folderMappings.$inferSelect): CoreMapping {
   };
 }
 
+/**
+ * Folder mappings decorated with who bills them. A mapping is brief-billed when
+ * it is marked fixed-price OR an active brief points at it; both mean the weekly
+ * path must not bill its hours. Loading briefs here rather than at each call
+ * site is deliberate — every consumer needs this decoration, and one that
+ * forgot it would silently double-bill.
+ */
+export async function loadCoreMappings(exec?: DbOrTx): Promise<CoreMapping[]> {
+  const e = exec ?? getDb();
+  const [raw, briefRows] = await Promise.all([
+    e.select().from(folderMappings),
+    e.select({ folderMappingId: briefs.folderMappingId }).from(briefs).where(eq(briefs.status, 'active')),
+  ]);
+  const briefFolders = new Set(
+    briefRows.map((b) => b.folderMappingId).filter((x): x is string => !!x),
+  );
+  return raw.map((m) => ({
+    ...toCoreMapping(m),
+    billedBy:
+      m.billingMode === 'fixed' || briefFolders.has(m.id) ? ('brief' as const) : ('week' as const),
+  }));
+}
+
 /** Recompute a per-project/per-day hours grid for a WEEK invoice; null for manual/one-off (window = -1). */
 async function invoiceDayGrid(inv: Invoice, s: Settings): Promise<WeekProjectDayGrid | null> {
   if (inv.prevBilledThroughMs < 0) return null;
   const db = getDb();
-  const [rawIntervals, rawMappings] = await Promise.all([
+  const [rawIntervals, coreMappings] = await Promise.all([
     db.select().from(activityIntervals),
-    db.select().from(folderMappings),
+    loadCoreMappings(db),
   ]);
-  const coreMappings = rawMappings.map(toCoreMapping);
-  const ci = applyFolderCutoffs(
-    intervalsForClient(rawIntervals.map(toCoreInterval), inv.clientId, coreMappings),
+  const ci = excludeBriefBilledFolders(
+    applyFolderCutoffs(
+      intervalsForClient(rawIntervals.map(toCoreInterval), inv.clientId, coreMappings),
+      coreMappings,
+    ),
     coreMappings,
   );
   const weekKey = weekStartKey(inv.prevBilledThroughMs, s.timezone);
@@ -80,19 +107,21 @@ async function invoiceDayGrid(inv: Invoice, s: Settings): Promise<WeekProjectDay
 
 async function loadAll() {
   const db = getDb();
-  const [rawIntervals, rawMappings, clientRows, oneOffs, invoiceRows, adjRows, s] = await Promise.all([
-    db.select().from(activityIntervals),
-    db.select().from(folderMappings),
-    db.select().from(clients).where(eq(clients.archived, 0)),
-    db.select().from(oneOffCharges),
-    db.select().from(invoices),
-    db.select().from(weekAdjustments),
-    getSettings(),
-  ]);
+  const [rawIntervals, rawMappings, coreMappings, clientRows, oneOffs, invoiceRows, adjRows, s] =
+    await Promise.all([
+      db.select().from(activityIntervals),
+      db.select().from(folderMappings),
+      loadCoreMappings(db),
+      db.select().from(clients).where(eq(clients.archived, 0)),
+      db.select().from(oneOffCharges),
+      db.select().from(invoices),
+      db.select().from(weekAdjustments),
+      getSettings(),
+    ]);
   return {
     intervals: rawIntervals.map(toCoreInterval),
     mappings: rawMappings,
-    coreMappings: rawMappings.map(toCoreMapping),
+    coreMappings,
     clientRows,
     oneOffs,
     invoiceRows,
@@ -199,7 +228,10 @@ export async function getOverview(): Promise<OverviewData> {
   const currentKey = weekStartKey(Date.now(), s.timezone);
 
   const stats: ClientStat[] = clientRows.map((client) => {
-    const ci = applyFolderCutoffs(intervalsForClient(intervals, client.id, coreMappings), coreMappings);
+    const ci = excludeBriefBilledFolders(
+      applyFolderCutoffs(intervalsForClient(intervals, client.id, coreMappings), coreMappings),
+      coreMappings,
+    );
     const billed = billedWeekStarts(invoiceRows, client.id);
     const adj = adjustmentsFor(adjRows, client.id);
     const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
@@ -254,7 +286,10 @@ export async function getClientDetail(clientId: string): Promise<ClientDetail | 
   const client = found[0];
   if (!client) return null;
 
-  const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
+  const ci = excludeBriefBilledFolders(
+    applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings),
+    coreMappings,
+  );
   const billed = billedWeekStarts(invoiceRows, clientId);
   const adj = adjustmentsFor(adjRows, clientId);
   const weeks = clientWeeks(ci, client, coreMappings, billed, adj, s);
@@ -317,7 +352,10 @@ export async function getWeekDetail(clientId: string, weekKey: string): Promise<
   const { startMs, endMs } = weekRange(weekKey, s.timezone);
   const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
   // Per-folder cutoffs are applied up front, so the week window is just [start, end).
-  const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
+  const ci = excludeBriefBilledFolders(
+    applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings),
+    coreMappings,
+  );
 
   const lines = buildInvoiceLines(ci, {
     ratePerHour: client.hourlyRate,
