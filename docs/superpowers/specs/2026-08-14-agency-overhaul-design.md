@@ -35,7 +35,7 @@ Phases A–C are self-contained. D depends on B (it issues invoices).
 | Bank details | One default set plus per-currency overrides, snapshotted onto each invoice. |
 | UI scope | Full restyle **and** restructure (new IA). |
 | Milestone completion detection | `MILESTONES.md` checklist in the project folder, read by the local agent. |
-| Brief billing model | Per brief: fixed-price **or** time & materials. |
+| Brief billing model | Per brief: fixed-price **or** time & materials. A T&M milestone bills the tracked hours attributable to it when completed. |
 | On milestone completion | Issue + email automatically, after a configurable hold window (default 10 min). |
 | Brief input | Paste text → deterministic parse → editable confirm table. |
 
@@ -308,7 +308,12 @@ milestones(
   title           text not null,
   deliverable     text,
   amount          double precision not null default 0,
-  estimate_hours  double precision not null default 0,
+  estimate_hours_low  double precision not null default 0,
+  estimate_hours_high double precision not null default 0,
+  estimate_amount_low  double precision not null default 0,
+  estimate_amount_high double precision not null default 0,
+  /** Set when this milestone's tracked time has been invoiced (T&M). */
+  billed_through_ms   bigint not null default 0,
   status          text not null default 'pending',   -- see state machine below
   ready_at        timestamptz,            -- when the box was seen ticked
   invoiced_at     timestamptz,
@@ -330,27 +335,76 @@ anything. Cancelling a `ready` milestone returns it to `pending`.
 `invoices` gains `brief_id text` and `milestone_id text` (both nullable, set only
 on milestone invoices).
 
-## D2. Brief parsing (deterministic, no LLM)
+## D2. Brief ingestion (deterministic, no LLM)
 
-`packages/core/src/brief.ts` → `parseBriefText(text): ParsedMilestone[]`.
+**Designed against a real document.** `A Story To Tell Work Estimate.docx` was read
+before this was written, and the earlier bullet-list design would have extracted
+almost nothing from it — while happily turning its `Subtotal` rows and its summary
+table into duplicate milestones, double-counting the money. What real estimates
+look like here:
 
-- A line is a milestone candidate when it starts with a list/number marker
-  (`-`, `*`, `1.`, `Milestone 2:`) **and** contains a money amount, or when it is
-  a list item appearing under a heading matching `/milestones?/i`.
-- Money: `£1,200` / `$800` / `1200 GBP` / `€1.200,00`. The first currency symbol
-  seen sets the brief's currency suggestion.
-- Hours: `~8h`, `8h`, `8 hrs`, `8 hours`, `(8h)`.
-- Title: the line with the marker, money and hours stripped, then trimmed of
-  trailing `—`, `-`, `:`.
-- Deliverable: the remainder after a `:` on the same line, or an immediately
-  following indented line.
-- A line starting with `Total` is used only to sanity-check the sum; a mismatch
-  renders a warning in the confirm table, never an error.
-- Zero matches is a valid result: the UI shows an empty editable table and keeps
-  the raw text in `source_text`.
+- **Tables**, not lists: `Work | Estimated time | Estimated cost`.
+- **Ranges everywhere**: `2–3 hrs`, `$60–$90`. Single figures are the exception.
+- **Two levels**: numbered sections, each with line items and a `Subtotal` row.
+- **A summary table at the end** repeating each section's totals.
+- **Prose that is not work**: assumptions, open questions, validity terms.
+- **A section written as prose** rather than a table row ("Estimated time: 2–4 hours").
+- **One rate stated once at the top** (`Rate: $30/hr`), not per line.
 
-The parse result is **always** shown in an editable table before saving. Nothing
-is created from a parse alone.
+### Input
+
+Two routes, both landing in the same confirm step:
+
+1. **Paste text** into a textarea.
+2. **Upload `.docx` / `.pdf` / `.md` / `.txt`.** Extraction runs server-side in the
+   upload action. `.docx` is a zip — read `word/document.xml`, map `<w:p>` to a
+   newline and `<w:tr>`/`<w:tc>` to a tab-delimited row, then strip tags. That
+   keeps table structure legible to the parser without a heavyweight dependency.
+   Reject anything over 2 MB. If extraction yields nothing, say so and offer the
+   paste box rather than failing silently.
+
+### `packages/core/src/brief.ts`
+
+`parseBriefText(text): ParsedBrief` where
+`ParsedBrief = { currency?: string; ratePerHour?: number; items: ParsedItem[]; warnings: string[] }`
+and each item carries `section`, `title`, `hoursLow/High`, `amountLow/High`.
+
+Rules, in order:
+
+- **Rows before lines.** A tab-delimited row with 2–3 cells is a candidate: first
+  cell is the title, the others are scanned for hours and money. Failing that, a
+  line carrying both a duration and an amount is a candidate.
+- **Ranges** are `A–B` on either en dash, em dash, hyphen or `to`, and set
+  low/high. A single figure sets both ends equal.
+- **Money**: `£1,200`, `$60`, `1200 GBP`, `€1.200,00`. The first symbol seen sets
+  the brief's currency.
+- **Hours**: `8h`, `8 hrs`, `8 hours`, `0.5 hr`, `~8h`, `(8h)`.
+- **Rate**: a line matching `/rate[:\s]*[£$€]?\s*([\d.]+)\s*(?:\/|per )\s*h/i`
+  sets `ratePerHour` for the whole brief.
+- **Sections**: a numbered heading (`1. Moving to the Free + Pro Plans`) opens a
+  section; subsequent items inherit it. Sections group the confirm table and
+  prefix the milestone key, so two sections may reuse a title without clashing.
+- **Skipped, and counted as skipped, never silently**: any row whose first cell
+  matches `/^(sub)?total|^overall|^estimated (time|cost)$/i`, and every row after
+  a heading matching `/^(overall|summary)/i` — that is the duplicate summary
+  table. Each skip appends to `warnings` so the user sees what was dropped and
+  why, rather than wondering where their rows went.
+- **Prose is not work.** A candidate must carry an amount or a duration; a
+  paragraph mentioning a number in passing does not qualify.
+
+### The confirm step
+
+The parse result is **always** shown in an editable table before saving; nothing
+is created from a parse alone. The table shows section, title, hours low/high,
+amount low/high, and a computed total the user can check against the document's
+own stated total. `warnings` render above it. The user may edit any cell, delete
+a row, or add one — a brief the parser fluffed is still a two-minute job by hand,
+which is the point of never auto-saving.
+
+Against the real estimate this should yield **13 items across 4 sections,
+≈47.5–71 hrs, $1,425–$2,130**, with the four `Subtotal` rows and the summary
+table skipped. That case belongs in the core tests as a fixture, so a future
+parser change that starts double-counting fails loudly.
 
 ## D3. `MILESTONES.md` contract
 
@@ -413,10 +467,26 @@ excluded from weekly time-billing** — otherwise the same work bills twice.
   that never reaches the client.
 - Core's `FolderMapping` type gains `billingMode?: 'time' | 'fixed'`.
 
-**Time & materials brief.** Milestones do not invoice; a ticked milestone goes to
-`done`. They record progress and burn-down against `estimate_hours`, with a
-warning when tracked hours pass the estimate. Time keeps billing weekly exactly
-as it does today, and the folder's `billing_mode` stays `'time'`.
+**Time & materials brief.** Completing a milestone issues an invoice for the
+hours actually **tracked against that brief's folder** since the previous
+milestone invoice, priced at the client's rate — not the estimate. The estimate
+range is a burn-down warning, never the amount billed. This is the mode that
+matches an estimate document saying "these are estimates rather than fixed-price
+quotes": the client is billed for real work done, and the range is the promise
+you made about roughly how much that would be.
+
+- The window is `(milestone.billed_through_ms, now]`, and on issue the
+  milestone's `billed_through_ms` is set to the cutoff, so the next milestone
+  bills only what follows. This mirrors how week invoices already derive their
+  window, so no time can be billed twice.
+- The folder's `billing_mode` stays `'time'`, but **weekly auto-send must skip a
+  folder that has an active T&M brief** — otherwise the same hours bill both
+  weekly and at milestone completion. This is the T&M analogue of the
+  fixed-price exclusion, and carries the same double-billing risk.
+- Burn-down: green below `estimate_hours_low`, amber between low and high, red
+  past `estimate_hours_high`. That threshold is what lets the user honour the
+  "I'll flag anything looking likely to reach the top end before it becomes an
+  issue" promise the estimate makes.
 
 ## D6. Auto-issue and the hold window
 
