@@ -14,6 +14,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
 
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
+  const isFixed = brief.billingMode === 'fixed';
 
   return (
     <div className="space-y-8">
@@ -36,6 +37,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               <th className="pb-2">Work</th>
               <th className="pb-2 text-right">Estimated hours</th>
               <th className="pb-2 text-right">Estimated cost</th>
+              {isFixed && <th className="pb-2 text-right">Agreed amount</th>}
               <th className="pb-2 text-right">Status</th>
             </tr>
           </thead>
@@ -57,6 +59,9 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                   {m.estimateAmountLow !== m.estimateAmountHigh &&
                     `–${formatMoney(m.estimateAmountHigh, brief.currency)}`}
                 </td>
+                {isFixed && (
+                  <td className="py-2 text-right">{formatMoney(m.amount, brief.currency)}</td>
+                )}
                 <td className="py-2 text-right">
                   <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">{m.status}</span>
                 </td>
@@ -81,6 +86,9 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                   brief.currency,
                 )}
               </td>
+              {isFixed && (
+                <td className="pt-2 text-right">{formatMoney(sum((m) => m.amount), brief.currency)}</td>
+              )}
               <td />
             </tr>
           </tfoot>

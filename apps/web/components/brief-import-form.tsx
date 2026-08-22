@@ -161,6 +161,10 @@ export function BriefImportForm({
             <option value="time">Time &amp; materials — bill the hours actually tracked</option>
             <option value="fixed">Fixed price — bill each milestone&apos;s agreed amount</option>
           </select>
+          <p className="mt-1 text-xs text-slate-500">
+            Fixed price bills the top of each range as the agreed amount — edit the Cost high column to
+            change it.
+          </p>
         </div>
         <div className="sm:col-span-2">
           <label className="label">Folder (optional)</label>
