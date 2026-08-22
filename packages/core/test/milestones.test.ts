@@ -172,3 +172,54 @@ describe('mergeMilestonesFile', () => {
     expect(mergeMilestonesFile(existing, fixed)).toBe(existing);
   });
 });
+
+describe('mergeMilestonesFile placement and line endings', () => {
+  it('inserts a new milestone beside the others, not below the user notes', () => {
+    const existing = renderMilestonesFile(fixed) + '\nNotes: waiting on the client.\n';
+    const grown: MilestoneFileInput = {
+      ...fixed,
+      items: [...fixed.items, { key: 'eeee', idx: 2, title: 'New work', amount: 300 }],
+    };
+    const merged = mergeMilestonesFile(existing, grown);
+    const lines = merged.split('\n');
+    const newIdx = lines.findIndex((l) => l.includes('id:eeee'));
+    const notesIdx = lines.findIndex((l) => l.startsWith('Notes:'));
+    const m2Idx = lines.findIndex((l) => l.includes('id:c41d'));
+    expect(newIdx).toBe(m2Idx + 1);
+    expect(newIdx).toBeLessThan(notesIdx);
+  });
+
+  it('keeps CRLF endings when the file already uses them', () => {
+    const existing = renderMilestonesFile(fixed).replace(/\n/g, '\r\n');
+    const grown: MilestoneFileInput = {
+      ...fixed,
+      items: [...fixed.items, { key: 'eeee', idx: 2, title: 'New work', amount: 300 }],
+    };
+    const merged = mergeMilestonesFile(existing, grown);
+    expect(merged).toContain('\r\n');
+    // No bare LF that isn't part of a CRLF pair.
+    expect(/(^|[^\r])\n/.test(merged)).toBe(false);
+    expect(parseMilestonesFile(merged).map((e) => e.key)).toEqual(['8f2a', 'c41d', 'eeee']);
+  });
+
+  it('still preserves a tick when inserting beside it', () => {
+    const existing = renderMilestonesFile(fixed).replace('- [ ] M1', '- [x] M1') + '\nMy notes\n';
+    const grown: MilestoneFileInput = {
+      ...fixed,
+      items: [...fixed.items, { key: 'eeee', idx: 2, title: 'New work', amount: 300 }],
+    };
+    const merged = mergeMilestonesFile(existing, grown);
+    expect(parseMilestonesFile(merged)).toEqual([
+      { key: '8f2a', checked: true },
+      { key: 'c41d', checked: false },
+      { key: 'eeee', checked: false },
+    ]);
+    expect(merged).toContain('My notes');
+  });
+
+  it('appends at the end when the file has no milestone lines at all', () => {
+    const merged = mergeMilestonesFile('Just my own notes, no list yet.\n', fixed);
+    expect(merged).toContain('Just my own notes');
+    expect(parseMilestonesFile(merged).map((e) => e.key)).toEqual(['8f2a', 'c41d']);
+  });
+});
