@@ -41,6 +41,7 @@ export const folderMappings = pgTable(
     hourlyRate: doublePrecision('hourly_rate'),
     /** Per-folder "bill from" cutoff (epoch ms); 0 = no cutoff. */
     billFromMs: bigint('bill_from_ms', { mode: 'number' }).notNull().default(0),
+    billingMode: text('billing_mode').notNull().default('time'),
   },
   (t) => ({
     pathUnique: uniqueIndex('folder_path_unique').on(t.path),
@@ -125,6 +126,8 @@ export const invoices = pgTable('invoices', {
   notes: text('notes'),
   issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
   paidAt: timestamp('paid_at', { withTimezone: true }),
+  briefId: text('brief_id'),
+  milestoneId: text('milestone_id'),
 }, (t) => ({
   clientWeekUnique: uniqueIndex('invoices_client_week_unique')
     .on(t.clientId, t.prevBilledThroughMs)
@@ -205,6 +208,63 @@ export const paymentAccounts = pgTable(
   (t) => ({ currencyUnique: uniqueIndex('payment_accounts_currency_unique').on(t.currency) }),
 );
 
+/** A costed piece of client work, ingested from an estimate or proposal. */
+export const briefs = pgTable(
+  'briefs',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** 'fixed' bills each milestone's agreed amount; 'time' bills tracked hours. */
+    billingMode: text('billing_mode').notNull().default('time'),
+    currency: text('currency').notNull(),
+    ratePerHour: doublePrecision('rate_per_hour').notNull().default(0),
+    folderMappingId: text('folder_mapping_id'),
+    /** The estimate as ingested, kept verbatim so the parse can be revisited. */
+    sourceText: text('source_text'),
+    status: text('status').notNull().default('active'),
+    autoInvoice: integer('auto_invoice').notNull().default(1),
+    holdMinutes: integer('hold_minutes').notNull().default(10),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ clientIdx: index('brief_client_idx').on(t.clientId) }),
+);
+
+/** One work item within a brief. Estimates are ranges, never a single figure. */
+export const milestones = pgTable(
+  'milestones',
+  {
+    id: text('id').primaryKey(),
+    briefId: text('brief_id')
+      .notNull()
+      .references(() => briefs.id, { onDelete: 'cascade' }),
+    idx: integer('idx').notNull(),
+    /** Short stable id; Phase D2 writes it into MILESTONES.md. */
+    key: text('key').notNull(),
+    section: text('section'),
+    title: text('title').notNull(),
+    deliverable: text('deliverable'),
+    /** Fixed-price briefs only; T&M leaves this 0 and bills tracked time. */
+    amount: doublePrecision('amount').notNull().default(0),
+    estimateHoursLow: doublePrecision('estimate_hours_low').notNull().default(0),
+    estimateHoursHigh: doublePrecision('estimate_hours_high').notNull().default(0),
+    estimateAmountLow: doublePrecision('estimate_amount_low').notNull().default(0),
+    estimateAmountHigh: doublePrecision('estimate_amount_high').notNull().default(0),
+    /** T&M: time already billed for this milestone. Window is (this, cutoff]. */
+    billedThroughMs: bigint('billed_through_ms', { mode: 'number' }).notNull().default(0),
+    status: text('status').notNull().default('pending'),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    invoicedAt: timestamp('invoiced_at', { withTimezone: true }),
+    invoiceId: text('invoice_id'),
+  },
+  (t) => ({
+    briefKeyUnique: uniqueIndex('milestones_brief_key_unique').on(t.briefId, t.key),
+    briefIdx: index('milestone_brief_idx').on(t.briefId),
+  }),
+);
+
 /** Signed per-week billable-hours adjustment (applied at issue time). */
 export const weekAdjustments = pgTable(
   'week_adjustments',
@@ -227,3 +287,5 @@ export type Settings = typeof settings.$inferSelect;
 export type OneOffCharge = typeof oneOffCharges.$inferSelect;
 export type WeekAdjustment = typeof weekAdjustments.$inferSelect;
 export type PaymentAccountRow = typeof paymentAccounts.$inferSelect;
+export type Brief = typeof briefs.$inferSelect;
+export type Milestone = typeof milestones.$inferSelect;
