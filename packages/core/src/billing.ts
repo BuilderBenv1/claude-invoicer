@@ -258,6 +258,19 @@ export function applyFolderCutoffs(
   return out;
 }
 
+/**
+ * Drop intervals whose folder is billed by a brief rather than by the week.
+ * Unmapped intervals pass through — they belong to no client and are filtered
+ * elsewhere. Always applied alongside applyFolderCutoffs; applying one without
+ * the other is how the same hours end up on two invoices.
+ */
+export function excludeBriefBilledFolders(
+  intervals: ActivityInterval[],
+  mappings: FolderMapping[],
+): ActivityInterval[] {
+  return intervals.filter((it) => matchMapping(it.cwd, mappings)?.billedBy !== 'brief');
+}
+
 /** Intervals that belong to a given client under the supplied mappings. */
 export function intervalsForClient(
   intervals: ActivityInterval[],

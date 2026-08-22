@@ -24,6 +24,7 @@ export {
   invoiceSubtotal,
   adjustmentLine,
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
   intervalsForClient,
   unassignedFolders,
   weekProjectDayGrid,
