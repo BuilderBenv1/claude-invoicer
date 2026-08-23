@@ -997,6 +997,107 @@ export async function deleteBrief(fd: FormData): Promise<void> {
 }
 
 /**
+ * Edit a brief's own fields. The brief is the thing work is done against, so it
+ * has to be amendable after import — scope and pricing move.
+ *
+ * `recompute` rewrites every milestone's estimate range as hours × the new
+ * rate. That is the honest way to change currency on a time & materials brief:
+ * the quoted amounts were themselves derived from hours × rate, so applying an
+ * FX rate to them would compound one derivation on top of another. A fixed-price
+ * brief's agreed `amount` is deliberately NOT touched — that is a number agreed
+ * with the client, not a computed one.
+ */
+export async function updateBrief(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing brief id');
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
+  if (!brief) throw new Error('Brief not found');
+
+  const title = str(fd, 'title') || brief.title;
+  const currency = normalizeCurrency(str(fd, 'currency')) || brief.currency;
+  const ratePerHour = numOrFallback(fd, 'ratePerHour', brief.ratePerHour);
+  const billingMode = str(fd, 'billingMode') === 'fixed' ? 'fixed' : 'time';
+  const recompute = str(fd, 'recompute') === 'on';
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(briefs)
+      .set({ title, currency, ratePerHour, billingMode })
+      .where(eq(briefs.id, id));
+
+    if (recompute) {
+      const rows = await tx.select().from(milestones).where(eq(milestones.briefId, id));
+      for (const m of rows) {
+        // Never re-price a milestone that has already been billed — its invoice
+        // is the record of what was charged and must not drift from it.
+        if (m.status === 'invoiced' || m.invoiceId) continue;
+        await tx
+          .update(milestones)
+          .set({
+            estimateAmountLow: round2(m.estimateHoursLow * ratePerHour),
+            estimateAmountHigh: round2(m.estimateHoursHigh * ratePerHour),
+          })
+          .where(eq(milestones.id, m.id));
+      }
+    }
+  });
+
+  revalidatePath('/briefs/' + id);
+  revalidatePath('/clients/' + brief.clientId);
+}
+
+/**
+ * Edit one milestone's scope and estimate. Blocked once billed: the invoice is
+ * the record of what was charged, and letting the milestone drift away from it
+ * would leave the two disagreeing with no way to tell which was right.
+ */
+export async function updateMilestone(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing milestone id');
+  const db = getDb();
+  const [m] = await db.select().from(milestones).where(eq(milestones.id, id));
+  if (!m) throw new Error('Milestone not found');
+  if (m.status === 'invoiced' || m.invoiceId) {
+    throw new Error('That milestone has already been invoiced and can no longer be edited.');
+  }
+
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, m.briefId));
+  if (!brief) throw new Error('Brief not found');
+
+  const title = str(fd, 'title') || m.title;
+  // A range typed backwards is a slip, not an instruction — order it rather
+  // than storing a range whose low exceeds its high.
+  const rawLow = numOrFallback(fd, 'hoursLow', m.estimateHoursLow);
+  const rawHigh = numOrFallback(fd, 'hoursHigh', m.estimateHoursHigh);
+  const hoursLow = Math.min(rawLow, rawHigh);
+  const hoursHigh = Math.max(rawLow, rawHigh);
+
+  // On a time & materials brief the estimated cost IS hours × rate, so it is
+  // derived here rather than typed. Letting it be entered separately lets the
+  // two drift, and then neither is trustworthy. A fixed-price brief keeps its
+  // agreed amount, which is a negotiated number, not a computed one.
+  const isFixed = brief.billingMode === 'fixed';
+  const amount = isFixed ? numOrFallback(fd, 'amount', m.amount) : 0;
+
+  await db
+    .update(milestones)
+    .set({
+      title,
+      estimateHoursLow: hoursLow,
+      estimateHoursHigh: hoursHigh,
+      estimateAmountLow: round2(hoursLow * brief.ratePerHour),
+      estimateAmountHigh: round2(hoursHigh * brief.ratePerHour),
+      amount,
+    })
+    .where(eq(milestones.id, id));
+
+  revalidatePath('/briefs/' + m.briefId);
+}
+
+/**
  * Attach (or detach) the folder a brief bills against, after import.
  *
  * A brief with no folder is invisible to the agent — `buildAgentBriefs` inner-

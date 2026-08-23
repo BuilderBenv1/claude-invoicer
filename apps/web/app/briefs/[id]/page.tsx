@@ -2,12 +2,15 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBriefDetail } from '@/lib/queries';
 import { formatMoney } from '@/lib/format';
+import { CurrencySelect } from '@/components/currency-select';
 import {
   deleteBrief,
   completeMilestone,
   cancelMilestone,
   issueMilestoneNow,
   setBriefFolder,
+  updateBrief,
+  updateMilestone,
 } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
@@ -44,21 +47,69 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               <th className="pb-2 text-right">Estimated hours</th>
               <th className="pb-2 text-right">Estimated cost</th>
               {isFixed && <th className="pb-2 text-right">Agreed amount</th>}
+              <th className="pb-2 text-right" />
               <th className="pb-2 text-right">Status</th>
             </tr>
           </thead>
           <tbody>
-            {milestones.map((m) => (
-              <tr key={m.id} className="border-t border-slate-800">
+            {milestones.map((m) => {
+              // Once billed, the invoice is the record of what was charged, so
+              // the row goes read-only rather than being allowed to drift from it.
+              const locked = m.status === 'invoiced' || !!m.invoiceId;
+              const fid = `ms-${m.id}`;
+              return (
+              <tr key={m.id} className="border-t border-slate-800 align-top">
                 <td className="py-2 font-mono text-xs text-slate-500">{m.key}</td>
                 <td className="py-2">
-                  {m.title}
-                  {m.section && <div className="text-xs text-slate-500">{m.section}</div>}
+                  {locked ? (
+                    m.title
+                  ) : (
+                    <>
+                      {/* A <form> cannot wrap <td>s, so it lives outside the row
+                          and each input joins it by id via the form attribute. */}
+                      <form id={fid} action={updateMilestone} />
+                      <input type="hidden" name="id" value={m.id} form={fid} />
+                      <input
+                        name="title"
+                        defaultValue={m.title}
+                        form={fid}
+                        className="input w-full text-sm"
+                        aria-label={`${m.key} scope`}
+                      />
+                    </>
+                  )}
+                  {m.section && <div className="mt-1 text-xs text-slate-500">{m.section}</div>}
                 </td>
                 <td className="py-2 text-right">
-                  {m.estimateHoursLow === m.estimateHoursHigh
-                    ? m.estimateHoursLow
-                    : `${m.estimateHoursLow}–${m.estimateHoursHigh}`}
+                  {locked ? (
+                    m.estimateHoursLow === m.estimateHoursHigh
+                      ? m.estimateHoursLow
+                      : `${m.estimateHoursLow}–${m.estimateHoursHigh}`
+                  ) : (
+                    <div className="flex items-center justify-end gap-1">
+                      <input
+                        name="hoursLow"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={m.estimateHoursLow}
+                        form={fid}
+                        className="input w-16 text-right text-sm"
+                        aria-label={`${m.key} hours low`}
+                      />
+                      <span className="text-slate-600">–</span>
+                      <input
+                        name="hoursHigh"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={m.estimateHoursHigh}
+                        form={fid}
+                        className="input w-16 text-right text-sm"
+                        aria-label={`${m.key} hours high`}
+                      />
+                    </div>
+                  )}
                 </td>
                 <td className="py-2 text-right">
                   {formatMoney(m.estimateAmountLow, brief.currency)}
@@ -66,8 +117,30 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                     `–${formatMoney(m.estimateAmountHigh, brief.currency)}`}
                 </td>
                 {isFixed && (
-                  <td className="py-2 text-right">{formatMoney(m.amount, brief.currency)}</td>
+                  <td className="py-2 text-right">
+                    {locked ? (
+                      formatMoney(m.amount, brief.currency)
+                    ) : (
+                      <input
+                        name="amount"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={m.amount}
+                        form={fid}
+                        className="input w-24 text-right text-sm"
+                        aria-label={`${m.key} agreed amount`}
+                      />
+                    )}
+                  </td>
                 )}
+                <td className="py-2 text-right">
+                  {!locked && (
+                    <button className="btn-secondary mb-1 text-xs" type="submit" form={fid}>
+                      Save
+                    </button>
+                  )}
+                </td>
                 <td className="py-2 text-right">
                   {m.status === 'pending' && (
                     <form action={completeMilestone} className="inline">
@@ -109,7 +182,8 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-700 font-semibold">
@@ -132,6 +206,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               {isFixed && (
                 <td className="pt-2 text-right">{formatMoney(sum((m) => m.amount), brief.currency)}</td>
               )}
+              <td />
               <td />
             </tr>
           </tfoot>
@@ -176,6 +251,57 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
         );
       })()}
 
+      <div className="card space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Brief settings
+        </h2>
+        <form action={updateBrief} className="grid gap-3 sm:grid-cols-2">
+          <input type="hidden" name="id" value={brief.id} />
+          <div className="sm:col-span-2">
+            <label className="label">Title</label>
+            <input name="title" defaultValue={brief.title} className="input" />
+          </div>
+          <div>
+            <label className="label">Billing</label>
+            <select name="billingMode" defaultValue={brief.billingMode} className="input">
+              <option value="time">Time &amp; materials — bill the hours tracked</option>
+              <option value="fixed">Fixed price — bill each agreed amount</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Currency</label>
+            <CurrencySelect name="currency" defaultValue={brief.currency} />
+          </div>
+          <div>
+            <label className="label">Rate per hour</label>
+            <input
+              name="ratePerHour"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={brief.ratePerHour}
+              className="input"
+            />
+          </div>
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" name="recompute" defaultChecked className="h-4 w-4" />
+              Recompute estimates as hours × rate
+            </label>
+          </div>
+          <div className="sm:col-span-2">
+            <button className="btn-primary" type="submit">
+              Save brief
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              Changing currency does not convert figures at an exchange rate — on a time &amp;
+              materials brief the estimate is hours × rate, so it is recomputed from the rate you
+              set. Milestones already invoiced keep their original figures.
+            </p>
+          </div>
+        </form>
+      </div>
+
       {/* The folder is what makes the brief real: MILESTONES.md is written into
           it, and it is where T&M milestones read their hours from. */}
       <div className="card space-y-2">
@@ -218,6 +344,20 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           </form>
         )}
       </div>
+
+      {/* The estimate exactly as it arrived. Kept because the brief can be
+          re-priced or re-scoped afterwards, and this is the record of what was
+          actually quoted to the client. */}
+      {brief.sourceText && (
+        <details className="card">
+          <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Original estimate as quoted
+          </summary>
+          <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap text-xs text-slate-400">
+            {brief.sourceText}
+          </pre>
+        </details>
+      )}
 
       <form action={deleteBrief}>
         <input type="hidden" name="id" value={brief.id} />
