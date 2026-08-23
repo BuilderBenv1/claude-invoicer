@@ -996,6 +996,46 @@ export async function deleteBrief(fd: FormData): Promise<void> {
   redirect('/clients/' + brief.clientId);
 }
 
+/**
+ * Attach (or detach) the folder a brief bills against, after import.
+ *
+ * A brief with no folder is invisible to the agent — `buildAgentBriefs` inner-
+ * joins on the mapping — so no MILESTONES.md is ever written and time &
+ * materials milestones have nothing to bill. The folder could previously only
+ * be chosen at import time, which left a brief imported without one permanently
+ * stuck.
+ */
+export async function setBriefFolder(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing brief id');
+  const folderMappingId = str(fd, 'folderMappingId');
+  const db = getDb();
+
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
+  if (!brief) throw new Error('Brief not found');
+
+  if (folderMappingId) {
+    // The mapping must belong to this brief's own client. Without this check a
+    // brief could be pointed at another client's folder and bill their hours.
+    const [mapping] = await db
+      .select()
+      .from(folderMappings)
+      .where(eq(folderMappings.id, folderMappingId));
+    if (!mapping) throw new Error('That folder no longer exists');
+    if (mapping.clientId !== brief.clientId) {
+      throw new Error('That folder belongs to a different client');
+    }
+  }
+
+  await db
+    .update(briefs)
+    .set({ folderMappingId: folderMappingId || null })
+    .where(eq(briefs.id, id));
+  revalidatePath('/briefs/' + id);
+  revalidatePath('/clients/' + brief.clientId);
+}
+
 /** Refresh every surface a milestone state change is visible on. */
 function revalidateMilestone(briefId: string): void {
   revalidatePath('/briefs/' + briefId);

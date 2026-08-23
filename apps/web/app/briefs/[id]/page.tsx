@@ -2,7 +2,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBriefDetail } from '@/lib/queries';
 import { formatMoney } from '@/lib/format';
-import { deleteBrief, completeMilestone, cancelMilestone, issueMilestoneNow } from '@/lib/actions';
+import {
+  deleteBrief,
+  completeMilestone,
+  cancelMilestone,
+  issueMilestoneNow,
+  setBriefFolder,
+} from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +16,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const detail = await getBriefDetail(id);
   if (!detail) notFound();
-  const { brief, milestones, trackedHours } = detail;
+  const { brief, milestones, trackedHours, folders } = detail;
 
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
@@ -166,15 +172,52 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                 Past the top of the estimate — flag this with the client before it becomes an issue.
               </p>
             )}
-            {!brief.folderMappingId && (
-              <p className="text-amber-400">
-                No folder is attached to this brief, so no time is tracked against it and time &amp;
-                materials milestones have nothing to bill. Attach one on the client page.
-              </p>
-            )}
           </div>
         );
       })()}
+
+      {/* The folder is what makes the brief real: MILESTONES.md is written into
+          it, and it is where T&M milestones read their hours from. */}
+      <div className="card space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Folder</h2>
+        {!brief.folderMappingId && (
+          <p className="text-sm text-amber-400">
+            No folder attached yet — so no <code>MILESTONES.md</code> is written, nothing is tracked
+            against this brief, and time &amp; materials milestones have nothing to bill.
+          </p>
+        )}
+        {folders.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            This client has no folders yet. Add one on the{' '}
+            <Link href={`/clients/${brief.clientId}`} className="underline">
+              client page
+            </Link>{' '}
+            first, then come back and pick it here.
+          </p>
+        ) : (
+          <form action={setBriefFolder} className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="id" value={brief.id} />
+            <div className="min-w-64 flex-1">
+              <label className="label">Bill this brief against</label>
+              <select
+                name="folderMappingId"
+                defaultValue={brief.folderMappingId ?? ''}
+                className="input"
+              >
+                <option value="">Not linked to a folder</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button className="btn-primary" type="submit">
+              Save folder
+            </button>
+          </form>
+        )}
+      </div>
 
       <form action={deleteBrief}>
         <input type="hidden" name="id" value={brief.id} />
