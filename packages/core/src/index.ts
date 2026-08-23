@@ -24,6 +24,7 @@ export {
   invoiceSubtotal,
   adjustmentLine,
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
   intervalsForClient,
   unassignedFolders,
   weekProjectDayGrid,
@@ -79,3 +80,12 @@ export {
   type BillingEvidenceRow,
 } from './billing-evidence.js';
 export { parseBriefText, type ParsedBrief, type ParsedItem } from './brief.js';
+export {
+  MILESTONE_LINE_RE,
+  renderMilestonesFile,
+  parseMilestonesFile,
+  mergeMilestonesFile,
+  type MilestoneFileItem,
+  type MilestoneFileInput,
+  type MilestoneFileEntry,
+} from './milestones.js';

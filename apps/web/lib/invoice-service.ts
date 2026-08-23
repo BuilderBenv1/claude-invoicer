@@ -1,8 +1,10 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, max, sql } from 'drizzle-orm';
 import type { NeonDatabase } from 'drizzle-orm/neon-serverless';
 import {
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
   intervalsForClient,
+  matchMapping,
   buildInvoiceLines,
   adjustmentLine,
   round2,
@@ -22,8 +24,10 @@ import {
 import { getDb, schema } from './db';
 import {
   activityIntervals,
+  briefs,
   clients,
   folderMappings,
+  milestones,
   invoiceLines,
   invoices,
   oneOffCharges,
@@ -36,7 +40,7 @@ import {
   type Settings,
 } from './db/schema';
 import { getSettings } from './settings';
-import { getInvoiceDetail } from './queries';
+import { getInvoiceDetail, loadCoreMappings } from './queries';
 import { sendInvoiceEmail, sendReceiptEmail } from './email';
 import { newId, newToken } from './format';
 
@@ -231,14 +235,7 @@ export async function issueWeekInvoice(
       );
     if (existing[0]) return { ok: false, reason: 'already-invoiced', number: existing[0].number };
 
-    const rawMappings = await tx.select().from(folderMappings);
-    const coreMappings: CoreMapping[] = rawMappings.map((m) => ({
-      clientId: m.clientId,
-      path: m.path,
-      label: m.label ?? undefined,
-      ratePerHour: m.hourlyRate ?? undefined,
-      billFromMs: m.billFromMs || undefined,
-    }));
+    const coreMappings = await loadCoreMappings(tx);
     const rawIntervals = await tx.select().from(activityIntervals);
     const intervals: CoreInterval[] = rawIntervals.map((r) => ({
       sessionId: r.sessionId,
@@ -248,7 +245,10 @@ export async function issueWeekInvoice(
       activeMs: r.activeMs,
     }));
 
-    const ci = applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings);
+    const ci = excludeBriefBilledFolders(
+      applyFolderCutoffs(intervalsForClient(intervals, clientId, coreMappings), coreMappings),
+      coreMappings,
+    );
     const roundIncrementMin = client.roundIncrementMin ?? s.defaultRoundIncrementMin;
     const timeLines = buildInvoiceLines(ci, {
       ratePerHour: client.hourlyRate,
@@ -302,6 +302,207 @@ export async function issueWeekInvoice(
     if (isDuplicateWeekError(e)) return { ok: false, reason: 'already-invoiced' };
     throw e;
   }
+}
+
+export type MilestoneIssueResult =
+  | { ok: true; id: string; number: string }
+  | {
+      ok: false;
+      reason:
+        | 'already-invoiced'
+        | 'nothing-to-bill'
+        | 'no-amount'
+        | 'not-ready'
+        | 'brief-missing'
+        | 'client-archived';
+    };
+
+/** True only for a duplicate on invoices_milestone_unique. */
+function isDuplicateMilestoneError(e: unknown): boolean {
+  const err = e as PgUniqueError;
+  const code = err?.code ?? err?.cause?.code;
+  if (code !== '23505') return false;
+  const constraint =
+    err?.constraint ?? err?.constraint_name ?? err?.cause?.constraint ?? err?.cause?.constraint_name;
+  if (constraint) return constraint === 'invoices_milestone_unique';
+  const message = err?.message ?? err?.cause?.message ?? '';
+  return message.includes('invoices_milestone_unique');
+}
+
+/**
+ * Bill one milestone. Fixed-price briefs invoice the agreed amount as a single
+ * line. Time & materials briefs invoice the hours actually tracked against the
+ * brief's folder since the brief last billed — NOT the estimate.
+ *
+ * The window opens at the greatest billed_through_ms across the brief's
+ * milestones, which is the cutoff of the most recent milestone invoice. Reading
+ * this milestone's own row instead would reopen the window at 0 for every
+ * milestone after the first and re-bill everything already billed.
+ */
+export async function issueMilestoneInvoice(milestoneId: string): Promise<MilestoneIssueResult> {
+  const db = getDb();
+  try {
+    return await db.transaction(async (tx): Promise<MilestoneIssueResult> => {
+      // Lock the row so two concurrent sweeps cannot both pass the status
+      // check. The unique index is the backstop; this avoids leaning on it.
+      const [m] = await tx.select().from(milestones).where(eq(milestones.id, milestoneId)).for('update');
+      if (!m) return { ok: false, reason: 'brief-missing' };
+      if (m.status === 'invoiced' || m.status === 'complete') {
+        return { ok: false, reason: 'already-invoiced' };
+      }
+      if (m.status !== 'ready') return { ok: false, reason: 'not-ready' };
+
+      const [brief] = await tx.select().from(briefs).where(eq(briefs.id, m.briefId));
+      if (!brief) return { ok: false, reason: 'brief-missing' };
+      const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
+      if (!s) throw new Error('Settings not initialized');
+      const [client] = await tx.select().from(clients).where(eq(clients.id, brief.clientId));
+      if (!client) return { ok: false, reason: 'brief-missing' };
+      if (client.archived) return { ok: false, reason: 'client-archived' };
+
+      const cutoffMs = Date.now();
+      let lines: NewLine[];
+
+      /**
+       * A milestone invoice is never a week invoice, so it stays out of the
+       * week namespace entirely — the same -1 convention manual documents use.
+       *
+       * This is not cosmetic. `invoices_client_week_unique` is a PARTIAL index
+       * over (client_id, prev_billed_through_ms) WHERE prev_billed_through_ms
+       * >= 0, so storing a real window start would make two briefs' first
+       * milestones collide on (client, 0). Worse, core's `billedWeekStarts`
+       * adds prev_billed_through_ms for every billing-evidence row with no
+       * >= 0 filter, so a window start that ever coincided with a week
+       * boundary would mark that week billed and it would never be invoiced.
+       * The real window lives on the milestone rows (billed_through_ms), which
+       * is what issueMilestoneInvoice actually reads.
+       */
+      const prevBilledThroughMs = -1;
+
+      if (brief.billingMode === 'fixed') {
+        if (m.amount <= 0) return { ok: false, reason: 'no-amount' };
+        lines = [{ label: m.title, hours: 0, ratePerHour: 0, amount: round2(m.amount) }];
+      } else {
+        const [prevRow] = await tx
+          .select({ prev: max(milestones.billedThroughMs) })
+          .from(milestones)
+          .where(eq(milestones.briefId, brief.id));
+        const windowStart = Number(prevRow?.prev ?? 0);
+
+        const folderPath = brief.folderMappingId
+          ? (await tx.select().from(folderMappings).where(eq(folderMappings.id, brief.folderMappingId)))[0]?.path
+          : undefined;
+        if (!folderPath) return { ok: false, reason: 'nothing-to-bill' };
+
+        const coreMappings = await loadCoreMappings(tx);
+        const rawIntervals = await tx.select().from(activityIntervals);
+        const all: CoreInterval[] = rawIntervals.map((r) => ({
+          sessionId: r.sessionId,
+          cwd: r.cwd,
+          startMs: r.startMs,
+          endMs: r.endMs,
+          activeMs: r.activeMs,
+        }));
+        // Scope to this brief's folder. Cutoffs still apply; the brief-billed
+        // exclusion deliberately does NOT — that filter exists to keep these
+        // hours off the weekly invoice, and this is the invoice they were kept for.
+        const scoped = applyFolderCutoffs(
+          all.filter((it) => matchMapping(it.cwd, coreMappings)?.path === folderPath),
+          coreMappings,
+        );
+        const timeLines = buildInvoiceLines(scoped, {
+          ratePerHour: brief.ratePerHour || client.hourlyRate,
+          roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
+          roundMode: s.roundMode as RoundMode,
+          billedThroughMs: windowStart,
+          cutoffMs,
+          groupBy: 'total',
+          mappings: coreMappings,
+          timeZone: s.timezone,
+        });
+        if (timeLines.length === 0 || timeLines.every((l) => l.hours <= 0)) {
+          // Nothing tracked since the last milestone. The work is still done —
+          // make it terminal rather than have every sweep retry it forever.
+          await tx
+            .update(milestones)
+            .set({ status: 'complete', invoicedAt: new Date(), billedThroughMs: cutoffMs })
+            .where(eq(milestones.id, milestoneId));
+          return { ok: false, reason: 'nothing-to-bill' };
+        }
+        lines = timeLines.map((l) => ({
+          label: `${m.title} — ${l.label.toLowerCase()}`,
+          hours: l.hours,
+          ratePerHour: l.ratePerHour,
+          amount: l.amount,
+        }));
+      }
+
+      const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
+      const { id, number } = await insertInvoice(tx, {
+        client,
+        settings: s,
+        lines,
+        subtotal,
+        prevBilledThroughMs,
+        cutoffMs,
+        notes: `${brief.title} · ${m.title}`,
+        currency: brief.currency,
+      });
+      await tx.update(invoices).set({ briefId: brief.id, milestoneId: m.id }).where(eq(invoices.id, id));
+      await tx
+        .update(milestones)
+        .set({ status: 'invoiced', invoicedAt: new Date(), invoiceId: id, billedThroughMs: cutoffMs })
+        .where(eq(milestones.id, milestoneId));
+      return { ok: true, id, number };
+    });
+  } catch (e) {
+    if (isDuplicateMilestoneError(e)) return { ok: false, reason: 'already-invoiced' };
+    throw e;
+  }
+}
+
+/**
+ * Issue every milestone whose hold window has expired, on a brief with
+ * auto_invoice on. Runs after each agent sync and from the daily cron, so a
+ * tick still bills within a day even when the local agent is off.
+ *
+ * Email is best-effort by design: RESEND_API_KEY is frequently unset, and an
+ * unsent email must never roll back or hide an invoice that was issued.
+ */
+export async function runMilestoneDueSweep(): Promise<{ issued: number; failed: number }> {
+  const db = getDb();
+  const now = new Date();
+  const due = await db
+    .select({ id: milestones.id })
+    .from(milestones)
+    .innerJoin(briefs, eq(milestones.briefId, briefs.id))
+    .where(
+      and(
+        eq(milestones.status, 'ready'),
+        eq(briefs.autoInvoice, 1),
+        eq(briefs.status, 'active'),
+        sql`${milestones.readyAt} + make_interval(mins => ${briefs.holdMinutes}) <= ${now}`,
+      ),
+    );
+
+  let issued = 0;
+  let failed = 0;
+  for (const row of due) {
+    try {
+      const res = await issueMilestoneInvoice(row.id);
+      if (!res.ok) continue;
+      issued++;
+      try {
+        await emailInvoiceById(res.id);
+      } catch (e) {
+        console.warn(`milestone invoice ${res.number} issued but not emailed:`, e);
+      }
+    } catch (e) {
+      failed++;
+      console.error(`milestone ${row.id} failed to issue:`, e);
+    }
+  }
+  return { issued, failed };
 }
 
 /** Mark an invoice paid + issue a receipt inside a transaction. Returns receipt number (null if already paid). */

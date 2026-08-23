@@ -33,4 +33,11 @@ export interface FolderMapping {
   ratePerHour?: number;
   /** Optional "bill from" cutoff (epoch ms): this folder's time before it is excluded. */
   billFromMs?: number;
+  /**
+   * Who bills this folder's time. 'brief' means a brief owns it — either a
+   * fixed-price brief (the amount is agreed) or an active time & materials
+   * brief (the hours bill at milestone completion). Either way the weekly
+   * path must skip it or the same work bills twice. Absent means 'week'.
+   */
+  billedBy?: 'week' | 'brief';
 }

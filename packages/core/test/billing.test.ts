@@ -9,6 +9,7 @@ import {
   invoiceSubtotal,
   activeAfter,
   applyFolderCutoffs,
+  excludeBriefBilledFolders,
   intervalsForClient,
   unassignedFolders,
 } from '../src/billing.js';
@@ -258,5 +259,45 @@ describe('client filtering + unassigned discovery', () => {
     expect(u).toHaveLength(1);
     expect(u[0]!.cwd).toBe('C:/personal/hackmonty');
     expect(u[0]!.activeMs).toBe(45 * MIN);
+  });
+});
+
+describe('excludeBriefBilledFolders', () => {
+  const mappings: FolderMapping[] = [
+    { clientId: 'c1', path: 'C:/work/site', billedBy: 'week' },
+    { clientId: 'c1', path: 'C:/work/app', billedBy: 'brief' },
+    { clientId: 'c1', path: 'C:/work/plain' },
+  ];
+
+  it('drops intervals in a folder billed by its brief', () => {
+    expect(excludeBriefBilledFolders([interval('C:/work/app/src', 0, 60)], mappings)).toEqual([]);
+  });
+
+  it('keeps intervals in a folder billed by the week', () => {
+    expect(excludeBriefBilledFolders([interval('C:/work/site/x', 0, 60)], mappings)).toHaveLength(1);
+  });
+
+  it('keeps intervals in a folder with no billedBy set', () => {
+    expect(excludeBriefBilledFolders([interval('C:/work/plain/y', 0, 60)], mappings)).toHaveLength(1);
+  });
+
+  it('keeps unmapped intervals untouched', () => {
+    expect(excludeBriefBilledFolders([interval('C:/elsewhere/z', 0, 60)], mappings)).toHaveLength(1);
+  });
+
+  it('uses the most specific mapping when folders nest', () => {
+    const nested: FolderMapping[] = [
+      { clientId: 'c1', path: 'C:/work', billedBy: 'week' },
+      { clientId: 'c1', path: 'C:/work/app', billedBy: 'brief' },
+    ];
+    expect(excludeBriefBilledFolders([interval('C:/work/app/src', 0, 60)], nested)).toEqual([]);
+    expect(excludeBriefBilledFolders([interval('C:/work/other', 0, 60)], nested)).toHaveLength(1);
+  });
+
+  it('returns a new array and does not mutate the input', () => {
+    const input = [interval('C:/work/site/x', 0, 60)];
+    const out = excludeBriefBilledFolders(input, mappings);
+    expect(out).not.toBe(input);
+    expect(input).toHaveLength(1);
   });
 });

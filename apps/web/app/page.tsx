@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { getOverview } from '@/lib/queries';
 import { formatDuration, formatMoney } from '@/lib/format';
-import { issueInvoice, archiveClient, unarchiveClient } from '@/lib/actions';
+import {
+  issueInvoice,
+  archiveClient,
+  unarchiveClient,
+  cancelMilestone,
+  issueMilestoneNow,
+} from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
 import { AddClientForm } from '@/components/add-client-form';
 import { DeleteClientForm } from '@/components/delete-client-form';
@@ -9,7 +15,8 @@ import { DeleteClientForm } from '@/components/delete-client-form';
 export const dynamic = 'force-dynamic';
 
 export default async function OverviewPage() {
-  const { stats, unassigned, clients, settings, currentWeekKey, archived } = await getOverview();
+  const { stats, unassigned, clients, settings, currentWeekKey, archived, readyMilestones } =
+    await getOverview();
   const clientOptions = clients.map((c) => ({ id: c.id, name: c.name }));
 
   return (
@@ -22,6 +29,46 @@ export default async function OverviewPage() {
           </p>
         </div>
       </header>
+
+      {/* Milestones delivered but not yet billed — the hold window */}
+      {readyMilestones.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+            Needs attention
+          </h2>
+          <div className="card space-y-3">
+            {readyMilestones.map((m) => (
+              <div key={m.id} className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <Link href={`/briefs/${m.briefId}`} className="hover:underline">
+                    {m.title}
+                  </Link>
+                  <div className="text-xs text-slate-500">
+                    {m.clientName} · {m.briefTitle} ·{' '}
+                    {m.autoInvoice
+                      ? `invoices automatically ${m.holdMinutes} min after being marked delivered`
+                      : 'waiting for you to invoice it'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <form action={issueMilestoneNow} className="inline">
+                    <input type="hidden" name="id" value={m.id} />
+                    <button className="btn-primary text-xs" type="submit">
+                      Invoice now
+                    </button>
+                  </form>
+                  <form action={cancelMilestone} className="inline">
+                    <input type="hidden" name="id" value={m.id} />
+                    <button className="btn-secondary text-xs" type="submit">
+                      Cancel
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Clients */}
       <section className="space-y-3">
