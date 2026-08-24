@@ -60,8 +60,12 @@ export async function syncMilestones(
     }
   }
 
-  if (updates.length === 0) return { files, ticks: 0, issued: 0 };
-
+  // Post on every scan, even with nothing ticked. The POST is what runs the
+  // server's due sweep, and a milestone can also reach 'ready' from the
+  // dashboard's "Mark delivered" button, which touches no file. Returning early
+  // here left those waiting on the daily cron — and if CRON_SECRET is unset that
+  // cron 401s, so they would never have invoiced at all. One small request per
+  // scan buys a hold window that actually expires on time.
   const post = await fetch(`${apiBaseUrl}/api/agent/milestones`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
