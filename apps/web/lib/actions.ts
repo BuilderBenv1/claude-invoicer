@@ -1063,6 +1063,84 @@ export async function updateBrief(fd: FormData): Promise<void> {
 }
 
 /**
+ * Add a milestone to an existing brief.
+ *
+ * Scope grows. Work gets agreed mid-project that was never in the estimate, and
+ * without this it could not be billed through the brief at all — the only
+ * options were to re-import the whole thing or invoice it off to one side,
+ * which loses the connection to the work it belongs to.
+ *
+ * The key is the next free MN rather than count+1, so deleting a milestone and
+ * adding another cannot collide on milestones_brief_key_unique. It also becomes
+ * the id in MILESTONES.md, where the append-only merge picks it up on the next
+ * sync without touching any existing line.
+ */
+export async function addMilestone(fd: FormData): Promise<void> {
+  await requireOwner();
+  const briefId = str(fd, 'briefId');
+  if (!briefId) throw new Error('Missing brief id');
+  const title = str(fd, 'title');
+  if (!title) throw new Error('Give the milestone a description');
+
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, briefId));
+  if (!brief) throw new Error('Brief not found');
+
+  const rawLow = numOrFallback(fd, 'hoursLow', 0);
+  const rawHigh = numOrFallback(fd, 'hoursHigh', 0);
+  const rawAmtLow = numOrFallback(fd, 'amountLow', 0);
+  const rawAmtHigh = numOrFallback(fd, 'amountHigh', 0);
+  const hoursLow = Math.min(rawLow, rawHigh);
+  const hoursHigh = Math.max(rawLow, rawHigh);
+  const amountLow = Math.min(rawAmtLow, rawAmtHigh);
+  const amountHigh = Math.max(rawAmtLow, rawAmtHigh);
+  // Left blank on a fixed-price brief, fall back to the quoted figure so the
+  // milestone is billable rather than silently worth nothing.
+  const amount = numOrFallback(fd, 'amount', amountHigh || amountLow);
+
+  await db.transaction(async (tx) => {
+    const rows = await tx.select().from(milestones).where(eq(milestones.briefId, briefId));
+    const used = new Set(rows.map((m) => m.key));
+    let n = rows.length + 1;
+    while (used.has(`M${n}`)) n++;
+    const idx = rows.reduce((max, m) => Math.max(max, m.idx), -1) + 1;
+
+    await tx.insert(milestones).values({
+      id: newId(),
+      briefId,
+      idx,
+      key: `M${n}`,
+      section: str(fd, 'section') || null,
+      title,
+      deliverable: null,
+      amount: brief.billingMode === 'fixed' ? round2(amount) : 0,
+      estimateHoursLow: hoursLow,
+      estimateHoursHigh: hoursHigh,
+      estimateAmountLow: amountLow,
+      estimateAmountHigh: amountHigh,
+    });
+  });
+
+  revalidatePath('/briefs/' + briefId);
+  revalidatePath('/clients/' + brief.clientId);
+}
+
+/** Remove a milestone. Refused once billed — the invoice refers to it. */
+export async function deleteMilestone(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing milestone id');
+  const db = getDb();
+  const [m] = await db.select().from(milestones).where(eq(milestones.id, id));
+  if (!m) return;
+  if (m.status === 'invoiced' || m.invoiceId) {
+    throw new Error('That milestone has been invoiced and cannot be removed.');
+  }
+  await db.delete(milestones).where(eq(milestones.id, id));
+  revalidatePath('/briefs/' + m.briefId);
+}
+
+/**
  * Put the quoted hours and amounts back to what the original estimate said.
  *
  * The estimate is kept verbatim on the brief precisely so this is possible.

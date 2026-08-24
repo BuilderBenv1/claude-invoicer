@@ -13,6 +13,8 @@ import {
   updateBrief,
   updateMilestone,
   restoreBriefQuote,
+  addMilestone,
+  deleteMilestone,
 } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
@@ -184,9 +186,19 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                 )}
                 <td className="py-2 text-right">
                   {!locked && (
-                    <button className="btn-secondary mb-1 text-xs" type="submit" form={fid}>
-                      Save
-                    </button>
+                    <div className="flex flex-col items-end gap-1">
+                      <button className="btn-secondary text-xs" type="submit" form={fid}>
+                        Save
+                      </button>
+                      {m.status === 'pending' && (
+                        <form action={deleteMilestone}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <button className="btn-ghost text-xs text-slate-500" type="submit">
+                            Remove
+                          </button>
+                        </form>
+                      )}
+                    </div>
                   )}
                 </td>
                 <td className="py-2 text-right">
@@ -255,6 +267,64 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           </tfoot>
         </table>
       </div>
+
+      {/* Scope grows: work gets agreed that was never in the original estimate,
+          and it has to be billable through the brief it belongs to. */}
+      <details className="card">
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Add a milestone
+        </summary>
+        <form action={addMilestone} className="mt-3 grid gap-3 sm:grid-cols-2">
+          <input type="hidden" name="briefId" value={brief.id} />
+          <div className="sm:col-span-2">
+            <label className="label">Work</label>
+            <input
+              name="title"
+              required
+              placeholder="e.g. Try Before You Join"
+              className="input"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label">Section (optional)</label>
+            <input name="section" placeholder="e.g. 5. Added scope" className="input" />
+          </div>
+          <div>
+            <label className="label">Quoted hours (low – high)</label>
+            <div className="flex items-center gap-2">
+              <input name="hoursLow" type="number" step="0.01" min="0" defaultValue={0} className="input" />
+              <span className="text-slate-600">–</span>
+              <input name="hoursHigh" type="number" step="0.01" min="0" defaultValue={0} className="input" />
+            </div>
+          </div>
+          <div>
+            <label className="label">Quoted cost (low – high)</label>
+            <div className="flex items-center gap-2">
+              <input name="amountLow" type="number" step="0.01" min="0" defaultValue={0} className="input" />
+              <span className="text-slate-600">–</span>
+              <input name="amountHigh" type="number" step="0.01" min="0" defaultValue={0} className="input" />
+            </div>
+          </div>
+          {isFixed && (
+            <div>
+              <label className="label">Bills at</label>
+              <input name="amount" type="number" step="0.01" min="0" className="input" />
+              <p className="mt-1 text-xs text-slate-500">
+                Leave blank to use the top of the quoted cost.
+              </p>
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <button className="btn-primary" type="submit">
+              Add milestone
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              It appears in <code>MILESTONES.md</code> on the next agent sync, appended below the
+              existing list without touching any line you have already ticked.
+            </p>
+          </div>
+        </form>
+      </details>
 
       {/* Delivered-but-unbilled milestones bill together as ONE invoice. On a
           T&M brief that is not a preference: the billing window runs from when
