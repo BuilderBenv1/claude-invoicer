@@ -331,14 +331,25 @@ async function buildMilestoneLines(
   if (brief.billingMode === 'fixed') {
     const priced = due.filter((m) => m.amount > 0);
     if (priced.length === 0) return { ok: false, reason: 'no-amount' };
+    const fixedRate = brief.ratePerHour || client.hourlyRate;
     return {
       ok: true,
-      lines: priced.map((m) => ({
-        label: m.title,
-        hours: 0,
-        ratePerHour: 0,
-        amount: round2(m.amount),
-      })),
+      lines: priced.map((m) => {
+        // Show hours and rate when the price genuinely is hours × rate, so the
+        // client can see where £100 came from instead of a bare number. Only
+        // when it reconciles exactly: a price set by hand is a negotiated
+        // figure, and printing an hours × rate beside it that does not multiply
+        // out invites the client to check the arithmetic and find it wrong.
+        const hrs = m.estimateHoursHigh || m.estimateHoursLow;
+        const reconciles =
+          hrs > 0 && fixedRate > 0 && round2(hrs * fixedRate) === round2(m.amount);
+        return {
+          label: m.title,
+          hours: reconciles ? hrs : 0,
+          ratePerHour: reconciles ? fixedRate : 0,
+          amount: round2(m.amount),
+        };
+      }),
     };
   }
 
