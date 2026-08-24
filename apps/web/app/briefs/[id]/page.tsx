@@ -44,7 +44,21 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
         </p>
       </header>
 
-      <div className="card overflow-x-auto">
+      <div className="card space-y-2 overflow-x-auto">
+        <p className="text-xs text-slate-500">
+          {isFixed ? (
+            <>
+              This brief bills the <span className="text-slate-300">Bills at</span> column. Quoted
+              hours and cost are the record of what was estimated — they do not affect the invoice.
+            </>
+          ) : (
+            <>
+              This brief bills the time actually tracked in its folder. Quoted hours and cost are
+              the estimate only — changing them will not change what is invoiced. To bill agreed
+              prices instead, switch this brief to fixed price below.
+            </>
+          )}
+        </p>
         <table className="w-full text-sm">
           <thead className="text-slate-400">
             <tr className="text-left">
@@ -253,6 +267,11 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
                 Ready to invoice — preview
               </h2>
+              <p className="text-xs text-slate-400">
+                {isFixed
+                  ? 'Billing fixed price — the total is the agreed amount per milestone. Tracked time does not affect it.'
+                  : 'Billing time & materials — the total is the time actually tracked in this folder. Editing quoted hours only changes how it is split across the lines, never the total.'}
+              </p>
               <p className="text-xs text-slate-500">
                 {brief.autoInvoice
                   ? `Fires automatically ${brief.holdMinutes} min after the last was marked delivered.`
