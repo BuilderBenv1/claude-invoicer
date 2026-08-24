@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBriefDetail } from '@/lib/queries';
+import { previewBriefMilestones } from '@/lib/invoice-service';
 import { formatMoney } from '@/lib/format';
 import { CurrencySelect } from '@/components/currency-select';
 import {
@@ -19,12 +20,15 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const detail = await getBriefDetail(id);
   if (!detail) notFound();
-  const { brief, milestones, trackedHours, folders, preview } = detail;
+  const { brief, milestones, trackedHours, folders } = detail;
 
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
   const isFixed = brief.billingMode === 'fixed';
   const readyCount = milestones.filter((m) => m.status === 'ready').length;
+  // Only priced when something is actually waiting to bill — it reads every
+  // interval, which is not worth doing on a brief with nothing delivered.
+  const preview = readyCount > 0 ? await previewBriefMilestones(brief.id) : null;
 
   return (
     <div className="space-y-8">

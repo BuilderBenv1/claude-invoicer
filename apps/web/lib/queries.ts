@@ -49,7 +49,6 @@ import {
   type WeekAdjustment,
 } from './db/schema';
 import { getSettings } from './settings';
-import { previewBriefMilestones, type MilestoneInvoicePreview } from './invoice-service';
 
 function toCoreInterval(r: typeof activityIntervals.$inferSelect): CoreInterval {
   return { sessionId: r.sessionId, cwd: r.cwd, startMs: r.startMs, endMs: r.endMs, activeMs: r.activeMs };
@@ -510,8 +509,6 @@ export async function getBriefDetail(id: string): Promise<{
   trackedHours: number;
   /** The client's folders, for the brief's folder picker. */
   folders: { id: string; label: string }[];
-  /** Exactly what the next milestone invoice would contain; null if none due. */
-  preview: MilestoneInvoicePreview | null;
 } | null> {
   const db = getDb();
   const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
@@ -542,12 +539,7 @@ export async function getBriefDetail(id: string): Promise<{
       trackedHours = round2(scoped.reduce((s, it) => s + it.activeMs, 0) / MS_PER_HOUR);
     }
   }
-  // Only compute a preview when something is actually waiting to bill —
-  // it reads every interval, which is not worth doing on every brief view.
-  const preview = rows.some((m) => m.status === 'ready')
-    ? await previewBriefMilestones(id)
-    : null;
-  return { brief, milestones: rows, trackedHours, folders, preview };
+  return { brief, milestones: rows, trackedHours, folders };
 }
 
 /** Bank details rows, default first, then by currency. */
