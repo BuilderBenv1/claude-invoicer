@@ -506,7 +506,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           <div className="flex items-end">
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" name="recompute" defaultChecked className="h-4 w-4" />
-              Recompute estimates as hours × rate
+              {isFixed ? 'Reprice from hours × rate (including Bills at)' : 'Recompute estimates as hours × rate'}
             </label>
           </div>
           <div>
@@ -543,9 +543,11 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               Save brief
             </button>
             <p className="mt-1 text-xs text-slate-500">
-              Changing currency does not convert figures at an exchange rate — on a time &amp;
-              materials brief the estimate is hours × rate, so it is recomputed from the rate you
-              set. Milestones already invoiced keep their original figures.
+              Changing currency does not convert at an exchange rate. The prices were themselves
+              hours × rate, so they are re-derived from the rate you set — leave the reprice box
+              ticked when changing currency, or the numbers stay on the old rate and only the
+              symbol changes. Untick it to keep prices exactly as they are. Milestones already
+              invoiced never change.
             </p>
           </div>
         </form>

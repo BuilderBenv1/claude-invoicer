@@ -1041,15 +1041,19 @@ export async function updateBrief(fd: FormData): Promise<void> {
       if (recompute) {
         set.estimateAmountLow = round2(m.estimateHoursLow * ratePerHour);
         set.estimateAmountHigh = round2(m.estimateHoursHigh * ratePerHour);
-      }
-      // A brief imported as time & materials has no agreed amount — the import
-      // only fills one for fixed-price briefs. Switching to fixed would then
-      // have nothing to bill, so seed it from the quoted figure. Only ever
-      // fills a blank; an amount already entered is left alone.
-      if (billingMode === 'fixed' && m.amount <= 0) {
-        const quoted = recompute
-          ? (set.estimateAmountHigh as number)
-          : m.estimateAmountHigh || m.estimateAmountLow;
+        // Re-derive what actually bills too, not just the quoted columns.
+        // Updating only the quote meant changing the rate moved nothing that
+        // reaches an invoice: the currency symbol changed and the figures
+        // stayed on the old rate. Recompute has to mean the billable number.
+        if (billingMode === 'fixed') {
+          set.amount = round2(m.estimateHoursHigh * ratePerHour);
+        }
+      } else if (billingMode === 'fixed' && m.amount <= 0) {
+        // Not recomputing, but a brief imported as time & materials carries no
+        // agreed amount — the import only fills one for fixed-price briefs — so
+        // switching to fixed would have nothing to bill. Seed from the quote,
+        // filling a blank only; a price already entered is left alone.
+        const quoted = m.estimateAmountHigh || m.estimateAmountLow;
         if (quoted > 0) set.amount = round2(quoted);
       }
       if (Object.keys(set).length > 0) {
