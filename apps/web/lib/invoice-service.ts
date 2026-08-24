@@ -5,6 +5,7 @@ import {
   excludeBriefBilledFolders,
   intervalsForClient,
   matchMapping,
+  apportionHours,
   buildInvoiceLines,
   adjustmentLine,
   round2,
@@ -341,18 +342,56 @@ function isDuplicateMilestoneError(e: unknown): boolean {
  */
 export async function issueMilestoneInvoice(milestoneId: string): Promise<MilestoneIssueResult> {
   const db = getDb();
+  const [m] = await db.select({ briefId: milestones.briefId }).from(milestones).where(eq(milestones.id, milestoneId));
+  if (!m) return { ok: false, reason: 'brief-missing' };
+  return issueBriefMilestones(m.briefId, [milestoneId]);
+}
+
+/**
+ * Bill a brief's delivered milestones as ONE invoice with a line each.
+ *
+ * Batching is not presentation — on a time & materials brief it is the only
+ * correct behaviour. The billing window runs from when the brief last billed to
+ * now, so issuing milestones one at a time gives the whole window to whichever
+ * went first and leaves the rest with nothing to bill. Delivering four
+ * milestones in an afternoon has to produce one invoice for the afternoon's
+ * work, not four invoices of which three are empty.
+ *
+ * Pass `only` to bill a subset; omit it to bill every milestone currently
+ * 'ready' on the brief. Milestones already invoiced are skipped, so the next
+ * run naturally picks up just the newly delivered ones.
+ */
+export async function issueBriefMilestones(
+  briefId: string,
+  only?: string[],
+): Promise<MilestoneIssueResult> {
+  const db = getDb();
   try {
     return await db.transaction(async (tx): Promise<MilestoneIssueResult> => {
-      // Lock the row so two concurrent sweeps cannot both pass the status
-      // check. The unique index is the backstop; this avoids leaning on it.
-      const [m] = await tx.select().from(milestones).where(eq(milestones.id, milestoneId)).for('update');
-      if (!m) return { ok: false, reason: 'brief-missing' };
-      if (m.status === 'invoiced' || m.status === 'complete') {
-        return { ok: false, reason: 'already-invoiced' };
-      }
-      if (m.status !== 'ready') return { ok: false, reason: 'not-ready' };
+      // Lock every candidate row up front. A concurrent sweep blocks here, then
+      // sees the rows are no longer 'ready' and bails — which is what prevents
+      // a double issue now that one invoice can cover many milestones and the
+      // per-milestone unique index no longer applies.
+      const locked = await tx
+        .select()
+        .from(milestones)
+        .where(eq(milestones.briefId, briefId))
+        .orderBy(milestones.idx)
+        .for('update');
 
-      const [brief] = await tx.select().from(briefs).where(eq(briefs.id, m.briefId));
+      const due = locked.filter(
+        (m) => m.status === 'ready' && (!only || only.includes(m.id)),
+      );
+      if (due.length === 0) {
+        // Distinguish "already handled" from "never marked delivered" so the
+        // caller can stay quiet about the former.
+        const anyTerminal = locked.some(
+          (m) => (!only || only.includes(m.id)) && (m.status === 'invoiced' || m.status === 'complete'),
+        );
+        return { ok: false, reason: anyTerminal ? 'already-invoiced' : 'not-ready' };
+      }
+
+      const [brief] = await tx.select().from(briefs).where(eq(briefs.id, briefId));
       if (!brief) return { ok: false, reason: 'brief-missing' };
       const [s] = await tx.select().from(settings).where(eq(settings.id, 1));
       if (!s) throw new Error('Settings not initialized');
@@ -380,8 +419,14 @@ export async function issueMilestoneInvoice(milestoneId: string): Promise<Milest
       const prevBilledThroughMs = -1;
 
       if (brief.billingMode === 'fixed') {
-        if (m.amount <= 0) return { ok: false, reason: 'no-amount' };
-        lines = [{ label: m.title, hours: 0, ratePerHour: 0, amount: round2(m.amount) }];
+        const priced = due.filter((m) => m.amount > 0);
+        if (priced.length === 0) return { ok: false, reason: 'no-amount' };
+        lines = priced.map((m) => ({
+          label: m.title,
+          hours: 0,
+          ratePerHour: 0,
+          amount: round2(m.amount),
+        }));
       } else {
         const [prevRow] = await tx
           .select({ prev: max(milestones.billedThroughMs) })
@@ -420,21 +465,47 @@ export async function issueMilestoneInvoice(milestoneId: string): Promise<Milest
           mappings: coreMappings,
           timeZone: s.timezone,
         });
-        if (timeLines.length === 0 || timeLines.every((l) => l.hours <= 0)) {
-          // Nothing tracked since the last milestone. The work is still done —
-          // make it terminal rather than have every sweep retry it forever.
-          await tx
-            .update(milestones)
-            .set({ status: 'complete', invoicedAt: new Date(), billedThroughMs: cutoffMs })
-            .where(eq(milestones.id, milestoneId));
+        const totalHours = round2(timeLines.reduce((sum, l) => sum + l.hours, 0));
+        if (totalHours <= 0) {
+          // Nothing tracked since the brief last billed. The work is still
+          // delivered — make these terminal rather than have every sweep retry
+          // them forever.
+          for (const m of due) {
+            await tx
+              .update(milestones)
+              .set({ status: 'complete', invoicedAt: new Date(), billedThroughMs: cutoffMs })
+              .where(eq(milestones.id, m.id));
+          }
           return { ok: false, reason: 'nothing-to-bill' };
         }
-        lines = timeLines.map((l) => ({
-          label: `${m.title} — ${l.label.toLowerCase()}`,
-          hours: l.hours,
-          ratePerHour: l.ratePerHour,
-          amount: l.amount,
+
+        // The tracked hours are one pool for the folder — nothing records which
+        // hour went to which milestone. Split them across the delivered
+        // milestones in proportion to their estimates so the invoice reads as
+        // the work delivered, while the total stays exactly the time worked.
+        const rate = brief.ratePerHour || client.hourlyRate;
+        const weights = due.map((m) => (m.estimateHoursLow + m.estimateHoursHigh) / 2);
+        const split = apportionHours(totalHours, weights);
+        lines = due.map((m, i) => ({
+          label: m.title,
+          hours: split[i]!,
+          ratePerHour: rate,
+          amount: round2(split[i]! * rate),
         }));
+
+        // Apportioning hours then pricing each line can drift a penny from
+        // pricing the total once. The client is billed the total, so the
+        // difference is absorbed on the largest line rather than left to make
+        // the invoice not add up.
+        const target = round2(totalHours * rate);
+        const drift = round2(target - lines.reduce((sum, l) => sum + l.amount, 0));
+        if (drift !== 0 && lines.length > 0) {
+          let biggest = 0;
+          for (let i = 1; i < lines.length; i++) {
+            if (lines[i]!.amount > lines[biggest]!.amount) biggest = i;
+          }
+          lines[biggest]!.amount = round2(lines[biggest]!.amount + drift);
+        }
       }
 
       const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
@@ -445,14 +516,27 @@ export async function issueMilestoneInvoice(milestoneId: string): Promise<Milest
         subtotal,
         prevBilledThroughMs,
         cutoffMs,
-        notes: `${brief.title} · ${m.title}`,
+        notes:
+          due.length === 1
+            ? `${brief.title} · ${due[0]!.title}`
+            : `${brief.title} · ${due.length} milestones delivered`,
         currency: brief.currency,
       });
-      await tx.update(invoices).set({ briefId: brief.id, milestoneId: m.id }).where(eq(invoices.id, id));
+      // milestone_id carries the link only when the invoice covers exactly one,
+      // so the partial unique index still guards that case. A batch is linked
+      // the other way round — each milestone points at the invoice — which is
+      // the direction that works for any number.
       await tx
-        .update(milestones)
-        .set({ status: 'invoiced', invoicedAt: new Date(), invoiceId: id, billedThroughMs: cutoffMs })
-        .where(eq(milestones.id, milestoneId));
+        .update(invoices)
+        .set({ briefId: brief.id, milestoneId: due.length === 1 ? due[0]!.id : null })
+        .where(eq(invoices.id, id));
+      const invoicedAt = new Date();
+      for (const m of due) {
+        await tx
+          .update(milestones)
+          .set({ status: 'invoiced', invoicedAt, invoiceId: id, billedThroughMs: cutoffMs })
+          .where(eq(milestones.id, m.id));
+      }
       return { ok: true, id, number };
     });
   } catch (e) {
@@ -473,7 +557,7 @@ export async function runMilestoneDueSweep(): Promise<{ issued: number; failed: 
   const db = getDb();
   const now = new Date();
   const due = await db
-    .select({ id: milestones.id })
+    .select({ id: milestones.id, briefId: milestones.briefId })
     .from(milestones)
     .innerJoin(briefs, eq(milestones.briefId, briefs.id))
     .where(
@@ -485,11 +569,22 @@ export async function runMilestoneDueSweep(): Promise<{ issued: number; failed: 
       ),
     );
 
+  // Group by brief so a batch of milestones delivered together becomes ONE
+  // invoice with a line each. Issuing per milestone would send the client a
+  // stack of invoices for a single afternoon's work — and on a T&M brief the
+  // first would swallow the whole billing window and the rest would bill zero.
+  const byBrief = new Map<string, string[]>();
+  for (const row of due) {
+    const list = byBrief.get(row.briefId);
+    if (list) list.push(row.id);
+    else byBrief.set(row.briefId, [row.id]);
+  }
+
   let issued = 0;
   let failed = 0;
-  for (const row of due) {
+  for (const [briefId, ids] of byBrief) {
     try {
-      const res = await issueMilestoneInvoice(row.id);
+      const res = await issueBriefMilestones(briefId, ids);
       if (!res.ok) continue;
       issued++;
       try {
@@ -499,7 +594,7 @@ export async function runMilestoneDueSweep(): Promise<{ issued: number; failed: 
       }
     } catch (e) {
       failed++;
-      console.error(`milestone ${row.id} failed to issue:`, e);
+      console.error(`brief ${briefId} failed to issue milestones:`, e);
     }
   }
   return { issued, failed };

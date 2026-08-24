@@ -38,6 +38,7 @@ import {
   insertInvoice,
   issueWeekInvoice,
   issueMilestoneInvoice,
+  issueBriefMilestones,
   markPaidTx,
   markPaidAndReceipt,
   emailInvoiceById,
@@ -1174,6 +1175,30 @@ export async function cancelMilestone(fd: FormData): Promise<void> {
 }
 
 /** Bill a ready milestone now, without waiting out the hold window. */
+/**
+ * Bill every milestone currently marked delivered on this brief, as one invoice
+ * with a line each — without waiting out the hold window.
+ *
+ * This is the button that matters when several milestones are finished in one
+ * go: it produces a single multi-line invoice rather than one per milestone.
+ */
+export async function issueBriefNow(fd: FormData): Promise<void> {
+  await requireOwner();
+  const briefId = str(fd, 'briefId');
+  if (!briefId) throw new Error('Missing brief id');
+  const res = await issueBriefMilestones(briefId);
+  if (res.ok) {
+    try {
+      await emailInvoiceById(res.id);
+    } catch (e) {
+      console.warn('milestone invoice issued but not emailed:', e);
+    }
+  } else if (res.reason !== 'nothing-to-bill' && res.reason !== 'already-invoiced') {
+    throw new Error(`Could not issue: ${res.reason}`);
+  }
+  revalidateMilestone(briefId);
+}
+
 export async function issueMilestoneNow(fd: FormData): Promise<void> {
   await requireOwner();
   const id = str(fd, 'id');

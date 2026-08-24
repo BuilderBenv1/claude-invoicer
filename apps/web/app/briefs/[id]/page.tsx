@@ -7,7 +7,7 @@ import {
   deleteBrief,
   completeMilestone,
   cancelMilestone,
-  issueMilestoneNow,
+  issueBriefNow,
   setBriefFolder,
   updateBrief,
   updateMilestone,
@@ -24,6 +24,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
   const isFixed = brief.billingMode === 'fixed';
+  const readyCount = milestones.filter((m) => m.status === 'ready').length;
 
   return (
     <div className="space-y-8">
@@ -151,17 +152,12 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                     </form>
                   )}
                   {m.status === 'ready' && (
-                    <div className="flex justify-end gap-2">
-                      <form action={issueMilestoneNow} className="inline">
-                        <input type="hidden" name="id" value={m.id} />
-                        <button className="btn-primary text-xs" type="submit">
-                          Invoice now
-                        </button>
-                      </form>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-xs text-amber-400">Delivered — awaiting invoice</span>
                       <form action={cancelMilestone} className="inline">
                         <input type="hidden" name="id" value={m.id} />
                         <button className="btn-secondary text-xs" type="submit">
-                          Cancel
+                          Undo
                         </button>
                       </form>
                     </div>
@@ -212,6 +208,34 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           </tfoot>
         </table>
       </div>
+
+      {/* Delivered-but-unbilled milestones bill together as ONE invoice. On a
+          T&M brief that is not a preference: the billing window runs from when
+          the brief last billed, so invoicing them separately would give the
+          whole window to the first and nothing to the rest. */}
+      {readyCount > 0 && (
+        <div className="card flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm">
+              <span className="text-amber-400">
+                {readyCount} milestone{readyCount === 1 ? '' : 's'} delivered
+              </span>{' '}
+              <span className="text-slate-400">and not yet invoiced.</span>
+            </p>
+            <p className="text-xs text-slate-500">
+              {brief.autoInvoice
+                ? `Bills automatically as one invoice ${brief.holdMinutes} min after the last was marked delivered — one line each.`
+                : 'Auto-invoicing is off for this brief, so these wait for you.'}
+            </p>
+          </div>
+          <form action={issueBriefNow}>
+            <input type="hidden" name="briefId" value={brief.id} />
+            <button className="btn-primary" type="submit">
+              Invoice {readyCount} now
+            </button>
+          </form>
+        </div>
+      )}
 
       {(() => {
         const lowTotal = sum((m) => m.estimateHoursLow);

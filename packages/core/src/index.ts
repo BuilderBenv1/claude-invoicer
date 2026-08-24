@@ -80,6 +80,7 @@ export {
   type BillingEvidenceRow,
 } from './billing-evidence.js';
 export { parseBriefText, type ParsedBrief, type ParsedItem } from './brief.js';
+export { apportionHours } from './apportion.js';
 export {
   MILESTONE_LINE_RE,
   renderMilestonesFile,

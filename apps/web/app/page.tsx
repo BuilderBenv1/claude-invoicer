@@ -6,7 +6,7 @@ import {
   archiveClient,
   unarchiveClient,
   cancelMilestone,
-  issueMilestoneNow,
+  issueBriefNow,
 } from '@/lib/actions';
 import { AssignFolderForm } from '@/components/assign-folder-form';
 import { AddClientForm } from '@/components/add-client-form';
@@ -36,36 +36,48 @@ export default async function OverviewPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
             Needs attention
           </h2>
-          <div className="card space-y-3">
-            {readyMilestones.map((m) => (
-              <div key={m.id} className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <Link href={`/briefs/${m.briefId}`} className="hover:underline">
-                    {m.title}
-                  </Link>
-                  <div className="text-xs text-slate-500">
-                    {m.clientName} · {m.briefTitle} ·{' '}
-                    {m.autoInvoice
-                      ? `invoices automatically ${m.holdMinutes} min after being marked delivered`
-                      : 'waiting for you to invoice it'}
+          {/* Grouped by brief, because that is how they bill: everything
+              delivered on one brief becomes a single multi-line invoice. */}
+          <div className="space-y-3">
+            {[...new Map(readyMilestones.map((m) => [m.briefId, m])).values()].map((head) => {
+              const group = readyMilestones.filter((m) => m.briefId === head.briefId);
+              return (
+                <div key={head.briefId} className="card space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <Link href={`/briefs/${head.briefId}`} className="font-medium hover:underline">
+                        {head.briefTitle}
+                      </Link>
+                      <div className="text-xs text-slate-500">
+                        {head.clientName} · {group.length} delivered ·{' '}
+                        {head.autoInvoice
+                          ? `bills as one invoice ${head.holdMinutes} min after the last`
+                          : 'auto-invoicing off — waiting for you'}
+                      </div>
+                    </div>
+                    <form action={issueBriefNow}>
+                      <input type="hidden" name="briefId" value={head.briefId} />
+                      <button className="btn-primary text-xs" type="submit">
+                        Invoice {group.length} now
+                      </button>
+                    </form>
                   </div>
+                  <ul className="space-y-1">
+                    {group.map((m) => (
+                      <li key={m.id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-slate-300">{m.title}</span>
+                        <form action={cancelMilestone} className="inline">
+                          <input type="hidden" name="id" value={m.id} />
+                          <button className="btn-secondary text-xs" type="submit">
+                            Undo
+                          </button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="flex gap-2">
-                  <form action={issueMilestoneNow} className="inline">
-                    <input type="hidden" name="id" value={m.id} />
-                    <button className="btn-primary text-xs" type="submit">
-                      Invoice now
-                    </button>
-                  </form>
-                  <form action={cancelMilestone} className="inline">
-                    <input type="hidden" name="id" value={m.id} />
-                    <button className="btn-secondary text-xs" type="submit">
-                      Cancel
-                    </button>
-                  </form>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
