@@ -1021,11 +1021,14 @@ export async function updateBrief(fd: FormData): Promise<void> {
   const ratePerHour = numOrFallback(fd, 'ratePerHour', brief.ratePerHour);
   const billingMode = str(fd, 'billingMode') === 'fixed' ? 'fixed' : 'time';
   const recompute = str(fd, 'recompute') === 'on';
+  // An unchecked checkbox posts nothing at all, so absence means off.
+  const autoInvoice = str(fd, 'autoInvoice') === 'on' ? 1 : 0;
+  const holdMinutes = Math.max(0, int(fd, 'holdMinutes', brief.holdMinutes));
 
   await db.transaction(async (tx) => {
     await tx
       .update(briefs)
-      .set({ title, currency, ratePerHour, billingMode })
+      .set({ title, currency, ratePerHour, billingMode, autoInvoice, holdMinutes })
       .where(eq(briefs.id, id));
 
     if (recompute) {

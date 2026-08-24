@@ -19,7 +19,7 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const detail = await getBriefDetail(id);
   if (!detail) notFound();
-  const { brief, milestones, trackedHours, folders } = detail;
+  const { brief, milestones, trackedHours, folders, preview } = detail;
 
   const sum = (pick: (m: (typeof milestones)[number]) => number) =>
     Math.round(milestones.reduce((s, m) => s + pick(m), 0) * 100) / 100;
@@ -214,26 +214,96 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           the brief last billed, so invoicing them separately would give the
           whole window to the first and nothing to the rest. */}
       {readyCount > 0 && (
-        <div className="card flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm">
-              <span className="text-amber-400">
-                {readyCount} milestone{readyCount === 1 ? '' : 's'} delivered
-              </span>{' '}
-              <span className="text-slate-400">and not yet invoiced.</span>
-            </p>
-            <p className="text-xs text-slate-500">
-              {brief.autoInvoice
-                ? `Bills automatically as one invoice ${brief.holdMinutes} min after the last was marked delivered — one line each.`
-                : 'Auto-invoicing is off for this brief, so these wait for you.'}
-            </p>
+        <div className="card space-y-3 border border-amber-500/30">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                Ready to invoice — preview
+              </h2>
+              <p className="text-xs text-slate-500">
+                {brief.autoInvoice
+                  ? `Fires automatically ${brief.holdMinutes} min after the last was marked delivered.`
+                  : 'Auto-invoicing is off, so this waits until you press the button.'}
+              </p>
+            </div>
+            <form action={issueBriefNow}>
+              <input type="hidden" name="briefId" value={brief.id} />
+              <button className="btn-primary" type="submit">
+                Invoice {readyCount} now
+              </button>
+            </form>
           </div>
-          <form action={issueBriefNow}>
-            <input type="hidden" name="briefId" value={brief.id} />
-            <button className="btn-primary" type="submit">
-              Invoice {readyCount} now
-            </button>
-          </form>
+
+          {!preview || preview.reason ? (
+            <p className="text-sm text-amber-400">
+              {preview?.reason === 'nothing-to-bill'
+                ? 'No tracked time in this folder since the brief last billed, so there is nothing to invoice yet. These will be closed off as delivered with nothing to bill.'
+                : preview?.reason === 'no-amount'
+                  ? 'None of the delivered milestones has an agreed amount set, so there is nothing to bill.'
+                  : preview?.reason === 'client-archived'
+                    ? 'This client is archived, so nothing will be invoiced.'
+                    : 'Nothing to preview yet.'}
+            </p>
+          ) : (
+            <>
+              <table className="w-full text-sm">
+                <thead className="text-slate-400">
+                  <tr className="text-left">
+                    <th className="pb-1 font-normal">Line</th>
+                    {!isFixed && <th className="pb-1 text-right font-normal">Hours</th>}
+                    <th className="pb-1 text-right font-normal">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.lines.map((l, i) => (
+                    <tr key={i} className="border-t border-slate-800">
+                      <td className="py-1 pr-3">{l.label}</td>
+                      {!isFixed && <td className="py-1 text-right tabular-nums">{l.hours}</td>}
+                      <td className="py-1 text-right tabular-nums">
+                        {formatMoney(l.amount, preview.currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-slate-700">
+                  {preview.taxAmount > 0 && (
+                    <>
+                      <tr>
+                        <td className="pt-2">Subtotal</td>
+                        {!isFixed && <td />}
+                        <td className="pt-2 text-right tabular-nums">
+                          {formatMoney(preview.subtotal, preview.currency)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>VAT {Math.round(preview.taxRate * 100)}%</td>
+                        {!isFixed && <td />}
+                        <td className="text-right tabular-nums">
+                          {formatMoney(preview.taxAmount, preview.currency)}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                  <tr className="font-semibold">
+                    <td className="pt-2">Total</td>
+                    {!isFixed && (
+                      <td className="pt-2 text-right tabular-nums">{preview.hours}</td>
+                    )}
+                    <td className="pt-2 text-right tabular-nums">
+                      {formatMoney(preview.total, preview.currency)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              {!isFixed && (
+                <p className="text-xs text-slate-500">
+                  Hours are the time actually tracked in this folder since the brief last billed,
+                  split across the delivered milestones in proportion to their estimates. Time is
+                  still accruing, so the figure will be a little higher when it fires.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -313,6 +383,35 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
               Recompute estimates as hours × rate
             </label>
           </div>
+          <div>
+            <label className="label">Hold before invoicing (minutes)</label>
+            <input
+              name="holdMinutes"
+              type="number"
+              step="1"
+              min="0"
+              defaultValue={brief.holdMinutes}
+              className="input"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              How long a delivered milestone waits before it bills. 0 invoices immediately.
+            </p>
+          </div>
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                name="autoInvoice"
+                defaultChecked={brief.autoInvoice === 1}
+                className="h-4 w-4"
+              />
+              Invoice automatically once the hold expires
+            </label>
+          </div>
+          <p className="text-xs text-slate-500 sm:col-span-2">
+            Turn auto-invoicing off to review every batch yourself — delivered milestones then sit
+            in the preview above until you press Invoice, however long that takes.
+          </p>
           <div className="sm:col-span-2">
             <button className="btn-primary" type="submit">
               Save brief

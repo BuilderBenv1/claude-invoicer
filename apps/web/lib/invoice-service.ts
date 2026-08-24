@@ -22,7 +22,7 @@ import {
   type RoundMode,
   type DocType,
 } from '@claude-invoicer/core';
-import { getDb, schema } from './db';
+import { getDb, schema, type DbOrTx } from './db';
 import {
   activityIntervals,
   briefs,
@@ -305,6 +305,112 @@ export async function issueWeekInvoice(
   }
 }
 
+type MilestoneRow = typeof milestones.$inferSelect;
+type LineBuild =
+  | { ok: true; lines: NewLine[] }
+  | { ok: false; reason: 'no-amount' | 'nothing-to-bill' };
+
+/**
+ * Work out the invoice lines for a set of delivered milestones.
+ *
+ * Shared verbatim by the real issue path and by the preview, so what the
+ * preview shows is what actually fires. A preview computed by a second,
+ * lookalike code path is worse than no preview: it agrees right up until the
+ * day it quietly doesn't.
+ *
+ * Read-only — the caller decides what to write.
+ */
+async function buildMilestoneLines(
+  exec: DbOrTx,
+  brief: typeof briefs.$inferSelect,
+  client: Client,
+  s: Settings,
+  due: MilestoneRow[],
+  cutoffMs: number,
+): Promise<LineBuild> {
+  if (brief.billingMode === 'fixed') {
+    const priced = due.filter((m) => m.amount > 0);
+    if (priced.length === 0) return { ok: false, reason: 'no-amount' };
+    return {
+      ok: true,
+      lines: priced.map((m) => ({
+        label: m.title,
+        hours: 0,
+        ratePerHour: 0,
+        amount: round2(m.amount),
+      })),
+    };
+  }
+
+  const [prevRow] = await exec
+    .select({ prev: max(milestones.billedThroughMs) })
+    .from(milestones)
+    .where(eq(milestones.briefId, brief.id));
+  const windowStart = Number(prevRow?.prev ?? 0);
+
+  const folderPath = brief.folderMappingId
+    ? (await exec.select().from(folderMappings).where(eq(folderMappings.id, brief.folderMappingId)))[0]?.path
+    : undefined;
+  if (!folderPath) return { ok: false, reason: 'nothing-to-bill' };
+
+  const coreMappings = await loadCoreMappings(exec);
+  const rawIntervals = await exec.select().from(activityIntervals);
+  const all: CoreInterval[] = rawIntervals.map((r) => ({
+    sessionId: r.sessionId,
+    cwd: r.cwd,
+    startMs: r.startMs,
+    endMs: r.endMs,
+    activeMs: r.activeMs,
+  }));
+  // Scope to this brief's folder. Cutoffs still apply; the brief-billed
+  // exclusion deliberately does NOT — that filter exists to keep these hours
+  // off the weekly invoice, and this is the invoice they were kept for.
+  const scoped = applyFolderCutoffs(
+    all.filter((it) => matchMapping(it.cwd, coreMappings)?.path === folderPath),
+    coreMappings,
+  );
+  const rate = brief.ratePerHour || client.hourlyRate;
+  const timeLines = buildInvoiceLines(scoped, {
+    ratePerHour: rate,
+    roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
+    roundMode: s.roundMode as RoundMode,
+    billedThroughMs: windowStart,
+    cutoffMs,
+    groupBy: 'total',
+    mappings: coreMappings,
+    timeZone: s.timezone,
+  });
+  const totalHours = round2(timeLines.reduce((sum, l) => sum + l.hours, 0));
+  if (totalHours <= 0) return { ok: false, reason: 'nothing-to-bill' };
+
+  // The tracked hours are one pool for the folder — nothing records which hour
+  // went to which milestone. Split them across the delivered milestones in
+  // proportion to their estimates so the invoice reads as the work delivered,
+  // while the total stays exactly the time worked.
+  const weights = due.map((m) => (m.estimateHoursLow + m.estimateHoursHigh) / 2);
+  const split = apportionHours(totalHours, weights);
+  const lines: NewLine[] = due.map((m, i) => ({
+    label: m.title,
+    hours: split[i]!,
+    ratePerHour: rate,
+    amount: round2(split[i]! * rate),
+  }));
+
+  // Apportioning hours then pricing each line can drift a penny from pricing
+  // the total once. The client is billed the total, so the difference is
+  // absorbed on the largest line rather than left to make the invoice not add up.
+  const target = round2(totalHours * rate);
+  const drift = round2(target - lines.reduce((sum, l) => sum + l.amount, 0));
+  if (drift !== 0 && lines.length > 0) {
+    let biggest = 0;
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i]!.amount > lines[biggest]!.amount) biggest = i;
+    }
+    lines[biggest]!.amount = round2(lines[biggest]!.amount + drift);
+  }
+  return { ok: true, lines };
+}
+
 export type MilestoneIssueResult =
   | { ok: true; id: string; number: string }
   | {
@@ -400,7 +506,22 @@ export async function issueBriefMilestones(
       if (client.archived) return { ok: false, reason: 'client-archived' };
 
       const cutoffMs = Date.now();
-      let lines: NewLine[];
+      const built = await buildMilestoneLines(tx, brief, client, s, due, cutoffMs);
+      if (!built.ok) {
+        if (built.reason === 'nothing-to-bill') {
+          // Nothing tracked since the brief last billed. The work is still
+          // delivered — make these terminal rather than have every sweep retry
+          // them forever. Only the issue path writes this; a preview must not.
+          for (const m of due) {
+            await tx
+              .update(milestones)
+              .set({ status: 'complete', invoicedAt: new Date(), billedThroughMs: cutoffMs })
+              .where(eq(milestones.id, m.id));
+          }
+        }
+        return { ok: false, reason: built.reason };
+      }
+      const lines = built.lines;
 
       /**
        * A milestone invoice is never a week invoice, so it stays out of the
@@ -417,96 +538,6 @@ export async function issueBriefMilestones(
        * is what issueMilestoneInvoice actually reads.
        */
       const prevBilledThroughMs = -1;
-
-      if (brief.billingMode === 'fixed') {
-        const priced = due.filter((m) => m.amount > 0);
-        if (priced.length === 0) return { ok: false, reason: 'no-amount' };
-        lines = priced.map((m) => ({
-          label: m.title,
-          hours: 0,
-          ratePerHour: 0,
-          amount: round2(m.amount),
-        }));
-      } else {
-        const [prevRow] = await tx
-          .select({ prev: max(milestones.billedThroughMs) })
-          .from(milestones)
-          .where(eq(milestones.briefId, brief.id));
-        const windowStart = Number(prevRow?.prev ?? 0);
-
-        const folderPath = brief.folderMappingId
-          ? (await tx.select().from(folderMappings).where(eq(folderMappings.id, brief.folderMappingId)))[0]?.path
-          : undefined;
-        if (!folderPath) return { ok: false, reason: 'nothing-to-bill' };
-
-        const coreMappings = await loadCoreMappings(tx);
-        const rawIntervals = await tx.select().from(activityIntervals);
-        const all: CoreInterval[] = rawIntervals.map((r) => ({
-          sessionId: r.sessionId,
-          cwd: r.cwd,
-          startMs: r.startMs,
-          endMs: r.endMs,
-          activeMs: r.activeMs,
-        }));
-        // Scope to this brief's folder. Cutoffs still apply; the brief-billed
-        // exclusion deliberately does NOT — that filter exists to keep these
-        // hours off the weekly invoice, and this is the invoice they were kept for.
-        const scoped = applyFolderCutoffs(
-          all.filter((it) => matchMapping(it.cwd, coreMappings)?.path === folderPath),
-          coreMappings,
-        );
-        const timeLines = buildInvoiceLines(scoped, {
-          ratePerHour: brief.ratePerHour || client.hourlyRate,
-          roundIncrementMin: client.roundIncrementMin ?? s.defaultRoundIncrementMin,
-          roundMode: s.roundMode as RoundMode,
-          billedThroughMs: windowStart,
-          cutoffMs,
-          groupBy: 'total',
-          mappings: coreMappings,
-          timeZone: s.timezone,
-        });
-        const totalHours = round2(timeLines.reduce((sum, l) => sum + l.hours, 0));
-        if (totalHours <= 0) {
-          // Nothing tracked since the brief last billed. The work is still
-          // delivered — make these terminal rather than have every sweep retry
-          // them forever.
-          for (const m of due) {
-            await tx
-              .update(milestones)
-              .set({ status: 'complete', invoicedAt: new Date(), billedThroughMs: cutoffMs })
-              .where(eq(milestones.id, m.id));
-          }
-          return { ok: false, reason: 'nothing-to-bill' };
-        }
-
-        // The tracked hours are one pool for the folder — nothing records which
-        // hour went to which milestone. Split them across the delivered
-        // milestones in proportion to their estimates so the invoice reads as
-        // the work delivered, while the total stays exactly the time worked.
-        const rate = brief.ratePerHour || client.hourlyRate;
-        const weights = due.map((m) => (m.estimateHoursLow + m.estimateHoursHigh) / 2);
-        const split = apportionHours(totalHours, weights);
-        lines = due.map((m, i) => ({
-          label: m.title,
-          hours: split[i]!,
-          ratePerHour: rate,
-          amount: round2(split[i]! * rate),
-        }));
-
-        // Apportioning hours then pricing each line can drift a penny from
-        // pricing the total once. The client is billed the total, so the
-        // difference is absorbed on the largest line rather than left to make
-        // the invoice not add up.
-        const target = round2(totalHours * rate);
-        const drift = round2(target - lines.reduce((sum, l) => sum + l.amount, 0));
-        if (drift !== 0 && lines.length > 0) {
-          let biggest = 0;
-          for (let i = 1; i < lines.length; i++) {
-            if (lines[i]!.amount > lines[biggest]!.amount) biggest = i;
-          }
-          lines[biggest]!.amount = round2(lines[biggest]!.amount + drift);
-        }
-      }
 
       const subtotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
       const { id, number } = await insertInvoice(tx, {
@@ -543,6 +574,70 @@ export async function issueBriefMilestones(
     if (isDuplicateMilestoneError(e)) return { ok: false, reason: 'already-invoiced' };
     throw e;
   }
+}
+
+export interface MilestoneInvoicePreview {
+  lines: NewLine[];
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  currency: string;
+  /** Total billable hours across the lines; 0 on a fixed-price brief. */
+  hours: number;
+  /** Set when there is nothing to bill, explaining why. */
+  reason?: 'no-amount' | 'nothing-to-bill' | 'not-ready' | 'brief-missing' | 'client-archived';
+}
+
+/**
+ * Exactly what the next milestone invoice for this brief would contain, without
+ * issuing it. Runs the same line builder the issue path runs, so the figures
+ * shown are the figures that will fire.
+ *
+ * Time keeps accruing, so on a T&M brief the hours shown are as-of-now and will
+ * be slightly higher by the time it actually issues. That is inherent to
+ * billing real tracked time, not an inaccuracy in the preview.
+ */
+export async function previewBriefMilestones(
+  briefId: string,
+): Promise<MilestoneInvoicePreview | null> {
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, briefId));
+  if (!brief) return null;
+  const due = (
+    await db.select().from(milestones).where(eq(milestones.briefId, briefId)).orderBy(milestones.idx)
+  ).filter((m) => m.status === 'ready');
+  if (due.length === 0) return null;
+
+  const [s] = await db.select().from(settings).where(eq(settings.id, 1));
+  if (!s) return null;
+  const [client] = await db.select().from(clients).where(eq(clients.id, brief.clientId));
+  const empty = {
+    lines: [],
+    subtotal: 0,
+    taxRate: 0,
+    taxAmount: 0,
+    total: 0,
+    currency: brief.currency,
+    hours: 0,
+  };
+  if (!client) return { ...empty, reason: 'brief-missing' };
+  if (client.archived) return { ...empty, reason: 'client-archived' };
+
+  const built = await buildMilestoneLines(db, brief, client, s, due, Date.now());
+  if (!built.ok) return { ...empty, reason: built.reason };
+
+  const subtotal = round2(built.lines.reduce((sum, l) => sum + l.amount, 0));
+  const totals = computeTotals(subtotal, s.vatRate);
+  return {
+    lines: built.lines,
+    subtotal: totals.subtotal,
+    taxRate: totals.taxRate,
+    taxAmount: totals.taxAmount,
+    total: totals.total,
+    currency: brief.currency,
+    hours: round2(built.lines.reduce((sum, l) => sum + l.hours, 0)),
+  };
 }
 
 /**
