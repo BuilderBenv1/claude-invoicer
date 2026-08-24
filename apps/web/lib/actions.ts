@@ -1031,25 +1031,86 @@ export async function updateBrief(fd: FormData): Promise<void> {
       .set({ title, currency, ratePerHour, billingMode, autoInvoice, holdMinutes })
       .where(eq(briefs.id, id));
 
-    if (recompute) {
-      const rows = await tx.select().from(milestones).where(eq(milestones.briefId, id));
-      for (const m of rows) {
-        // Never re-price a milestone that has already been billed — its invoice
-        // is the record of what was charged and must not drift from it.
-        if (m.status === 'invoiced' || m.invoiceId) continue;
-        await tx
-          .update(milestones)
-          .set({
-            estimateAmountLow: round2(m.estimateHoursLow * ratePerHour),
-            estimateAmountHigh: round2(m.estimateHoursHigh * ratePerHour),
-          })
-          .where(eq(milestones.id, m.id));
+    const rows = await tx.select().from(milestones).where(eq(milestones.briefId, id));
+    for (const m of rows) {
+      // Never re-price a milestone that has already been billed — its invoice
+      // is the record of what was charged and must not drift from it.
+      if (m.status === 'invoiced' || m.invoiceId) continue;
+
+      const set: Partial<typeof milestones.$inferInsert> = {};
+      if (recompute) {
+        set.estimateAmountLow = round2(m.estimateHoursLow * ratePerHour);
+        set.estimateAmountHigh = round2(m.estimateHoursHigh * ratePerHour);
+      }
+      // A brief imported as time & materials has no agreed amount — the import
+      // only fills one for fixed-price briefs. Switching to fixed would then
+      // have nothing to bill, so seed it from the quoted figure. Only ever
+      // fills a blank; an amount already entered is left alone.
+      if (billingMode === 'fixed' && m.amount <= 0) {
+        const quoted = recompute
+          ? (set.estimateAmountHigh as number)
+          : m.estimateAmountHigh || m.estimateAmountLow;
+        if (quoted > 0) set.amount = round2(quoted);
+      }
+      if (Object.keys(set).length > 0) {
+        await tx.update(milestones).set(set).where(eq(milestones.id, m.id));
       }
     }
   });
 
   revalidatePath('/briefs/' + id);
   revalidatePath('/clients/' + brief.clientId);
+}
+
+/**
+ * Put the quoted hours and amounts back to what the original estimate said.
+ *
+ * The estimate is kept verbatim on the brief precisely so this is possible.
+ * Matching is by position, not title, so renaming a milestone does not lose its
+ * price. Already-billed milestones are skipped — their invoice is the record.
+ */
+export async function restoreBriefQuote(fd: FormData): Promise<void> {
+  await requireOwner();
+  const id = str(fd, 'id');
+  if (!id) throw new Error('Missing brief id');
+  const db = getDb();
+  const [brief] = await db.select().from(briefs).where(eq(briefs.id, id));
+  if (!brief) throw new Error('Brief not found');
+  if (!brief.sourceText) {
+    throw new Error('This brief has no original estimate stored, so there is nothing to restore.');
+  }
+
+  const parsed = parseBriefText(brief.sourceText);
+  if (parsed.items.length === 0) {
+    throw new Error('The stored estimate could not be re-read.');
+  }
+
+  const rows = await db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.briefId, id))
+    .orderBy(milestones.idx);
+
+  await db.transaction(async (tx) => {
+    for (const m of rows) {
+      if (m.status === 'invoiced' || m.invoiceId) continue;
+      const src = parsed.items[m.idx];
+      if (!src) continue;
+      await tx
+        .update(milestones)
+        .set({
+          estimateHoursLow: src.hoursLow,
+          estimateHoursHigh: src.hoursHigh,
+          estimateAmountLow: src.amountLow,
+          estimateAmountHigh: src.amountHigh,
+          // On a fixed-price brief the quoted top of the range is the price.
+          amount: brief.billingMode === 'fixed' ? round2(src.amountHigh || src.amountLow) : m.amount,
+        })
+        .where(eq(milestones.id, m.id));
+    }
+  });
+
+  revalidatePath('/briefs/' + id);
 }
 
 /**
@@ -1079,12 +1140,12 @@ export async function updateMilestone(fd: FormData): Promise<void> {
   const hoursLow = Math.min(rawLow, rawHigh);
   const hoursHigh = Math.max(rawLow, rawHigh);
 
-  // On a time & materials brief the estimated cost IS hours × rate, so it is
-  // derived here rather than typed. Letting it be entered separately lets the
-  // two drift, and then neither is trustworthy. A fixed-price brief keeps its
-  // agreed amount, which is a negotiated number, not a computed one.
-  const isFixed = brief.billingMode === 'fixed';
-  const amount = isFixed ? numOrFallback(fd, 'amount', m.amount) : 0;
+  // The quoted range is what the client was told the work would cost. It is
+  // NEVER derived from hours: deriving it meant that editing hours silently
+  // rewrote the agreed price, destroying the only record of what was quoted.
+  // Re-deriving is available deliberately, via the brief's recompute option.
+  const rawAmtLow = numOrFallback(fd, 'amountLow', m.estimateAmountLow);
+  const rawAmtHigh = numOrFallback(fd, 'amountHigh', m.estimateAmountHigh);
 
   await db
     .update(milestones)
@@ -1092,9 +1153,10 @@ export async function updateMilestone(fd: FormData): Promise<void> {
       title,
       estimateHoursLow: hoursLow,
       estimateHoursHigh: hoursHigh,
-      estimateAmountLow: round2(hoursLow * brief.ratePerHour),
-      estimateAmountHigh: round2(hoursHigh * brief.ratePerHour),
-      amount,
+      estimateAmountLow: Math.min(rawAmtLow, rawAmtHigh),
+      estimateAmountHigh: Math.max(rawAmtLow, rawAmtHigh),
+      // What actually gets billed on a fixed-price brief.
+      amount: numOrFallback(fd, 'amount', m.amount),
     })
     .where(eq(milestones.id, id));
 

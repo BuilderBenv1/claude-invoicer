@@ -12,6 +12,7 @@ import {
   setBriefFolder,
   updateBrief,
   updateMilestone,
+  restoreBriefQuote,
 } from '@/lib/actions';
 
 export const dynamic = 'force-dynamic';
@@ -49,9 +50,9 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
             <tr className="text-left">
               <th className="pb-2">#</th>
               <th className="pb-2">Work</th>
-              <th className="pb-2 text-right">Estimated hours</th>
-              <th className="pb-2 text-right">Estimated cost</th>
-              {isFixed && <th className="pb-2 text-right">Agreed amount</th>}
+              <th className="pb-2 text-right">Quoted hours</th>
+              <th className="pb-2 text-right">Quoted cost</th>
+              {isFixed && <th className="pb-2 text-right">Bills at</th>}
               <th className="pb-2 text-right" />
               <th className="pb-2 text-right">Status</th>
             </tr>
@@ -117,9 +118,37 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
                   )}
                 </td>
                 <td className="py-2 text-right">
-                  {formatMoney(m.estimateAmountLow, brief.currency)}
-                  {m.estimateAmountLow !== m.estimateAmountHigh &&
-                    `–${formatMoney(m.estimateAmountHigh, brief.currency)}`}
+                  {locked ? (
+                    <>
+                      {formatMoney(m.estimateAmountLow, brief.currency)}
+                      {m.estimateAmountLow !== m.estimateAmountHigh &&
+                        `–${formatMoney(m.estimateAmountHigh, brief.currency)}`}
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-end gap-1">
+                      <input
+                        name="amountLow"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={m.estimateAmountLow}
+                        form={fid}
+                        className="input w-20 text-right text-sm"
+                        aria-label={`${m.key} quoted low`}
+                      />
+                      <span className="text-slate-600">–</span>
+                      <input
+                        name="amountHigh"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={m.estimateAmountHigh}
+                        form={fid}
+                        className="input w-20 text-right text-sm"
+                        aria-label={`${m.key} quoted high`}
+                      />
+                    </div>
+                  )}
                 </td>
                 {isFixed && (
                   <td className="py-2 text-right">
@@ -362,9 +391,13 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           <div>
             <label className="label">Billing</label>
             <select name="billingMode" defaultValue={brief.billingMode} className="input">
-              <option value="time">Time &amp; materials — bill the hours tracked</option>
-              <option value="fixed">Fixed price — bill each agreed amount</option>
+              <option value="fixed">Fixed price — bill the agreed amount per milestone</option>
+              <option value="time">Time &amp; materials — bill the hours actually tracked</option>
             </select>
+            <p className="mt-1 text-xs text-slate-500">
+              Billing against a quote the client already agreed? Use fixed price — how long the
+              work took is then your margin, not their bill.
+            </p>
           </div>
           <div>
             <label className="label">Currency</label>
@@ -483,6 +516,16 @@ export default async function BriefPage({ params }: { params: Promise<{ id: stri
           <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap text-xs text-slate-400">
             {brief.sourceText}
           </pre>
+          <form action={restoreBriefQuote} className="mt-3">
+            <input type="hidden" name="id" value={brief.id} />
+            <button className="btn-secondary text-xs" type="submit">
+              Reset hours and prices to this
+            </button>
+            <span className="ml-2 text-xs text-slate-500">
+              Matches by position, so renamed milestones keep their price. Already-invoiced ones
+              are left alone.
+            </span>
+          </form>
         </details>
       )}
 
