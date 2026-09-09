@@ -97,6 +97,11 @@ npm run once --workspace @claude-invoicer/agent
 
 To remove it later: `./apps/agent/scripts/uninstall-task.ps1`.
 
+No admin rights on the machine? Run `./apps/agent/scripts/install-startup.ps1` with the same
+arguments instead. It installs a hidden Startup-folder launcher rather than a Scheduled Task and
+needs no elevation; the task installer now refuses to run un-elevated instead of pretending it
+succeeded. Check either variant is alive with `Get-Process node`.
+
 ---
 
 ## 6. Use it

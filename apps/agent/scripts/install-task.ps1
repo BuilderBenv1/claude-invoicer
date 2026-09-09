@@ -22,6 +22,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Register-ScheduledTask needs an elevated shell. Check up front: the CIM
+# cmdlets below do not honour $ErrorActionPreference, so without this an
+# "Access is denied" would scroll past and the script would still print
+# "Registered" and "Started" as if it had worked.
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+  [Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  throw "This installer must run in a PowerShell window opened with 'Run as administrator'. No admin rights? Use .\install-startup.ps1 instead; it does the same job without them."
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..\..")).Path
 $entry = Join-Path $repoRoot "apps\agent\src\index.ts"
@@ -67,9 +77,9 @@ $settings = New-ScheduledTaskSettingsSet `
 $settings.Hidden = $true
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force -ErrorAction Stop | Out-Null
 Write-Host "Registered scheduled task '$TaskName' (hidden, auto-starts at logon)."
 
-Start-ScheduledTask -TaskName $TaskName
+Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 Write-Host "Started '$TaskName'. It scans every $ScanIntervalMin min and relaunches automatically after a restart."
 Write-Host "Manage it anytime with: Get-ScheduledTask $TaskName  |  Stop-ScheduledTask $TaskName"
