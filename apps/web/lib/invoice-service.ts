@@ -1,5 +1,5 @@
 import { and, eq, isNull, max, sql } from 'drizzle-orm';
-import type { NeonDatabase } from 'drizzle-orm/neon-serverless';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   applyFolderCutoffs,
   excludeBriefBilledFolders,
@@ -45,7 +45,7 @@ import { getInvoiceDetail, loadCoreMappings } from './queries';
 import { sendInvoiceEmail, sendReceiptEmail } from './email';
 import { newId, newToken } from './format';
 
-type Db = NeonDatabase<typeof schema>;
+type Db = PostgresJsDatabase<typeof schema>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 interface NewLine {

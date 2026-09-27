@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  pgTable,
+  pgSchema,
   text,
   integer,
   bigint,
@@ -12,8 +12,16 @@ import {
   index,
 } from 'drizzle-orm/pg-core';
 
+/**
+ * Every table lives in its own schema, not `public`: the database is shared
+ * with another Supabase project whose table names (clients, invoices…) would
+ * collide, and Supabase's Data API serves `public` to anyone holding the anon
+ * key. A schema it doesn't expose keeps invoices off that API entirely.
+ */
+export const invoicer = pgSchema('invoicer');
+
 /** A billable client. `billedThroughMs` is the reset mark for their clock. */
-export const clients = pgTable('clients', {
+export const clients = invoicer.table('clients', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   hourlyRate: doublePrecision('hourly_rate').notNull().default(0),
@@ -28,7 +36,7 @@ export const clients = pgTable('clients', {
 });
 
 /** Maps a folder (and everything beneath it) to a client. Path is normalized. */
-export const folderMappings = pgTable(
+export const folderMappings = invoicer.table(
   'folder_mappings',
   {
     id: text('id').primaryKey(),
@@ -50,7 +58,7 @@ export const folderMappings = pgTable(
 );
 
 /** Flat one-off charges (e.g. a fixed-fee website) added to a client's next invoice. */
-export const oneOffCharges = pgTable(
+export const oneOffCharges = invoicer.table(
   'one_off_charges',
   {
     id: text('id').primaryKey(),
@@ -67,7 +75,7 @@ export const oneOffCharges = pgTable(
 );
 
 /** Activity intervals uploaded by the local agent. Upsert key: (sessionId, startMs). */
-export const activityIntervals = pgTable(
+export const activityIntervals = invoicer.table(
   'activity_intervals',
   {
     sessionId: text('session_id').notNull(),
@@ -83,7 +91,7 @@ export const activityIntervals = pgTable(
 );
 
 /** An issued invoice. Identity fields are snapshotted so PDFs stay stable. */
-export const invoices = pgTable('invoices', {
+export const invoices = invoicer.table('invoices', {
   id: text('id').primaryKey(),
   number: text('number').notNull(),
   clientId: text('client_id')
@@ -141,7 +149,7 @@ export const invoices = pgTable('invoices', {
     .where(sql`${t.milestoneId} IS NOT NULL`),
 }));
 
-export const invoiceLines = pgTable(
+export const invoiceLines = invoicer.table(
   'invoice_lines',
   {
     id: serial('id').primaryKey(),
@@ -156,7 +164,7 @@ export const invoiceLines = pgTable(
   (t) => ({ invoiceIdx: index('line_invoice_idx').on(t.invoiceId) }),
 );
 
-export const receipts = pgTable('receipts', {
+export const receipts = invoicer.table('receipts', {
   id: text('id').primaryKey(),
   invoiceId: text('invoice_id')
     .notNull()
@@ -166,7 +174,7 @@ export const receipts = pgTable('receipts', {
 }, (t) => ({ invoiceUnique: uniqueIndex('receipts_invoice_unique').on(t.invoiceId) }));
 
 /** Singleton settings row (id = 1). */
-export const settings = pgTable('settings', {
+export const settings = invoicer.table('settings', {
   id: integer('id').primaryKey(),
   businessName: text('business_name').notNull().default('My Business'),
   businessEmail: text('business_email'),
@@ -193,7 +201,7 @@ export const settings = pgTable('settings', {
 });
 
 /** Bank details shown on invoices: one row per currency, plus a 'DEFAULT' fallback. */
-export const paymentAccounts = pgTable(
+export const paymentAccounts = invoicer.table(
   'payment_accounts',
   {
     id: text('id').primaryKey(),
@@ -212,7 +220,7 @@ export const paymentAccounts = pgTable(
 );
 
 /** A costed piece of client work, ingested from an estimate or proposal. */
-export const briefs = pgTable(
+export const briefs = invoicer.table(
   'briefs',
   {
     id: text('id').primaryKey(),
@@ -239,7 +247,7 @@ export const briefs = pgTable(
 );
 
 /** One work item within a brief. Estimates are ranges, never a single figure. */
-export const milestones = pgTable(
+export const milestones = invoicer.table(
   'milestones',
   {
     id: text('id').primaryKey(),
@@ -273,7 +281,7 @@ export const milestones = pgTable(
 );
 
 /** Signed per-week billable-hours adjustment (applied at issue time). */
-export const weekAdjustments = pgTable(
+export const weekAdjustments = invoicer.table(
   'week_adjustments',
   {
     clientId: text('client_id')

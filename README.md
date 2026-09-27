@@ -25,7 +25,7 @@ dashboard. Your own projects stay unassigned and are never billed.
          ▼
 ┌───────────────────────── Vercel ───────────────────────────┐
 │  apps/web (Next.js)                                         │
-│   Google sign-in · Neon Postgres · invoices/receipts (PDF) │
+│   Google sign-in · Supabase · invoices/receipts (PDF)       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,7 +58,7 @@ The dry run prints active time per folder straight from your transcripts — try
 needs no accounts.
 
 To run the full system (dashboard + syncing agent), follow **[SETUP.md](./SETUP.md)**:
-deploy to Vercel, add Neon Postgres + Google sign-in, then install the local agent.
+deploy to Vercel, add a Supabase database + Google sign-in, then install the local agent.
 
 ## Common commands
 

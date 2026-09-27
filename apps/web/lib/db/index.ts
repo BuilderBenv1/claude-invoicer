@@ -1,27 +1,30 @@
-import { Pool } from '@neondatabase/serverless';
-import { drizzle, type NeonDatabase } from 'drizzle-orm/neon-serverless';
+import postgres from 'postgres';
+import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from './schema';
 
-let dbInstance: NeonDatabase<typeof schema> | null = null;
+let dbInstance: PostgresJsDatabase<typeof schema> | null = null;
 
 /**
- * Lazily create the Drizzle client. Uses the Neon serverless Pool (WebSocket)
- * so interactive transactions work; Node 22+/Vercel provide a global WebSocket.
+ * Lazily create the Drizzle client over Supabase's transaction pooler (port
+ * 6543). The pooler hands each transaction to whichever server connection is
+ * free, so prepared statements can't survive between queries — `prepare: false`
+ * is required, not an optimisation. Interactive transactions and row locks
+ * still work: a transaction holds one connection until it commits.
  * Reads DATABASE_URL at call time so the module can be imported during build.
  */
-export function getDb(): NeonDatabase<typeof schema> {
+export function getDb(): PostgresJsDatabase<typeof schema> {
   if (dbInstance) return dbInstance;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
-  const pool = new Pool({ connectionString: url });
-  dbInstance = drizzle(pool, { schema });
+  const client = postgres(url, { prepare: false });
+  dbInstance = drizzle(client, { schema });
   return dbInstance;
 }
 
 export { schema };
 
 /** The Drizzle client. */
-export type Db = NeonDatabase<typeof schema>;
+export type Db = PostgresJsDatabase<typeof schema>;
 /** A Drizzle transaction handle, as passed to `db.transaction(tx => ...)`. */
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /**

@@ -1,7 +1,7 @@
 # Setup
 
 One-time setup for the hybrid deployment: a **Vercel dashboard** + a **local agent**. Plan on
-~20 minutes. You'll create a Google OAuth client, a Neon database, and a Vercel project.
+~20 minutes. You'll create a Google OAuth client, a Supabase database, and a Vercel project.
 
 The code is already pushed to https://github.com/BuilderBenv1/claude-invoicer.
 
@@ -35,18 +35,20 @@ openssl rand -hex 32
 
 ---
 
-## 3. Vercel project + Neon database
+## 3. Vercel project + Supabase database
 
 1. https://vercel.com → **Add New → Project** → import `BuilderBenv1/claude-invoicer`.
 2. **Root Directory: `apps/web`** (important — it's a monorepo). Framework auto-detects Next.js.
-3. In **Project Settings → General**, set **Node.js Version to 22.x or 24.x**
-   (the database driver needs a global `WebSocket`, which Node ≥ 21 provides).
-4. **Storage → Create / Connect → Neon (Postgres)** from the Marketplace. This injects
-   `DATABASE_URL` automatically.
+3. In **Project Settings → General**, set **Node.js Version to 22.x or 24.x**.
+4. In your Supabase project, run `apps/web/supabase/0000_invoicer_baseline.sql` in the SQL
+   editor. It creates everything in its own `invoicer` schema, so it can share a project
+   with other apps. Copy the **transaction pooler** connection string (port 6543) from
+   **Connect** and set it as `DATABASE_URL` below.
 5. **Settings → Environment Variables** — add the rest:
 
    | Name | Value |
    |------|-------|
+   | `DATABASE_URL` | Supabase transaction pooler string (step 4) |
    | `AUTH_SECRET` | from step 1 |
    | `AUTH_GOOGLE_ID` | from step 2 |
    | `AUTH_GOOGLE_SECRET` | from step 2 |
