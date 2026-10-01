@@ -671,7 +671,9 @@ export async function runMilestoneDueSweep(): Promise<{ issued: number; failed: 
         eq(milestones.status, 'ready'),
         eq(briefs.autoInvoice, 1),
         eq(briefs.status, 'active'),
-        sql`${milestones.readyAt} + make_interval(mins => ${briefs.holdMinutes}) <= ${now}`,
+        // A raw sql`` param bypasses Drizzle's column mapping, and postgres-js
+        // throws on a bare Date there — pass ISO text and cast it server-side.
+        sql`${milestones.readyAt} + make_interval(mins => ${briefs.holdMinutes}) <= ${now.toISOString()}::timestamptz`,
       ),
     );
 
