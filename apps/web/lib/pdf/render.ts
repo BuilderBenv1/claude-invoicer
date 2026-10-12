@@ -59,12 +59,55 @@ function fit(text: string, font: PDFFont, size: number, maxWidth: number): strin
   return s + '…';
 }
 
+/**
+ * Word-wrap text to a max width. Honours explicit newlines, and prefers to break
+ * after a comma so an address reads one part per line ("Unit E4 …, Poole,") rather
+ * than splitting mid-phrase. A single word wider than the column is truncated.
+ */
+function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const out: string[] = [];
+  const fits = (s: string) => font.widthOfTextAtSize(s, size) <= maxWidth;
+  for (const para of toWinAnsi(text).split(/\r?\n/)) {
+    const words = para.trim().split(/\s+/).filter(Boolean);
+    let line = '';
+    for (let i = 0; i < words.length; i++) {
+      const cand = line ? `${line} ${words[i]}` : words[i];
+      if (fits(cand)) {
+        line = cand;
+        continue;
+      }
+      if (line) {
+        // Back up to the last comma on this line if there is one, carrying the
+        // tail over so the break lands between address parts.
+        const parts = line.split(' ');
+        const lastComma = parts.map((w) => w.endsWith(',')).lastIndexOf(true);
+        if (lastComma >= 0 && lastComma < parts.length - 1) {
+          out.push(parts.slice(0, lastComma + 1).join(' '));
+          line = parts.slice(lastComma + 1).join(' ');
+          i--; // retry this word against the carried-over tail
+          continue;
+        }
+        out.push(line);
+      }
+      line = fits(words[i]) ? words[i] : fit(words[i], font, size, maxWidth);
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
 /** Draw text horizontally centred on the page. Sanitises once, so the measured string is the drawn one. */
 function drawCentered(page: PDFPage, text: string, y: number, font: PDFFont, size: number, color = INK) {
   const safe = toWinAnsi(text);
   const x = (W - font.widthOfTextAtSize(safe, size)) / 2;
   page.drawText(safe, { x, y, size, font, color });
 }
+
+// The bill-to block shares its rows with the ISSUED/DUE/STATUS column on the
+// right, and the business identity shares the header with the title on the left,
+// so both are capped well short of the opposite margin.
+const PARTY_MAX = 300;
+const BUSINESS_MAX = 220;
 
 function hr(page: PDFPage, y: number) {
   page.drawLine({ start: { x: M, y }, end: { x: RIGHT, y }, thickness: 1, color: LINE });
@@ -89,8 +132,10 @@ function header(page: PDFPage, f: Fonts, invoice: Invoice, title: string, subtit
     invoice.vatNumber ? `VAT No: ${invoice.vatNumber}` : null,
   ]) {
     if (!v) continue;
-    draw(page, v, M, by, f.reg, 9, MUTED, RIGHT);
-    by -= 12;
+    for (const line of wrap(v, f.reg, 9, BUSINESS_MAX)) {
+      draw(page, line, M, by, f.reg, 9, MUTED, RIGHT);
+      by -= 12;
+    }
   }
   const lineY = Math.min(sy, by) - 6;
   hr(page, lineY);
@@ -99,12 +144,14 @@ function header(page: PDFPage, f: Fonts, invoice: Invoice, title: string, subtit
 
 function partyBlock(page: PDFPage, f: Fonts, label: string, name: string, extra: (string | null)[], y: number) {
   draw(page, label.toUpperCase(), M, y, f.reg, 8, MUTED);
-  draw(page, name, M, y - 14, f.bold, 11);
+  draw(page, fit(name, f.bold, 11, PARTY_MAX), M, y - 14, f.bold, 11);
   let yy = y - 27;
   for (const v of extra) {
     if (!v) continue;
-    draw(page, v, M, yy, f.reg, 9, MUTED);
-    yy -= 12;
+    for (const line of wrap(v, f.reg, 9, PARTY_MAX)) {
+      draw(page, line, M, yy, f.reg, 9, MUTED);
+      yy -= 12;
+    }
   }
   return yy;
 }
